@@ -1,0 +1,7 @@
+tab_spaces = 2
+edition = "2024"
+
+# run `cargo +nightly fmt`
+trailing_semicolon = false
+imports_granularity = "Item"
+
