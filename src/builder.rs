@@ -22,7 +22,7 @@ struct ComponentConfig {
 #[serde(rename_all = "lowercase")]
 enum ComponentType {
   Generator,
-  Sorter,
+  Algorithm,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,7 +39,7 @@ struct OutputStep {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct BuildManifest {
   pub generators: HashMap<String, PathBuf>,
-  pub sorters: HashMap<String, PathBuf>,
+  pub algorithm_executables: HashMap<String, PathBuf>,
 }
 
 pub async fn build_components(components_dir: PathBuf, manifest_out: PathBuf) -> Result<()> {
@@ -115,18 +115,16 @@ async fn process_component(
     );
   }
 
-  // Store absolute path or relative to root? Relative is usually safer for portable manifests.
-  // Here we just use the path as resolved.
   match config.component_type {
     ComponentType::Generator => {
       manifest.generators.insert(config.name, exe_path);
     }
-    ComponentType::Sorter => {
+    ComponentType::Algorithm => {
       if let Some(lang) = config.language {
-        manifest.sorters.insert(lang, exe_path);
+        manifest.algorithm_executables.insert(lang, exe_path);
       } else {
         tracing::warn!(
-          "Sorter '{}' missing 'language' field. Skipping registration.",
+          "Algorithm component '{}' missing 'language' field. Skipping registration.",
           config.name
         );
       }

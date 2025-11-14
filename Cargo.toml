@@ -3,6 +3,10 @@ name = "impalab"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "impa"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.100"
 clap = { version = "4.5.51", features = ["derive", "env"] }
