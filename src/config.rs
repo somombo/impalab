@@ -1,5 +1,6 @@
 use crate::builder::BuildManifest;
 use crate::cli::RunArgs;
+use crate::command::CommandArgs;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
@@ -29,20 +30,23 @@ fn resolve_generator(
     }
     if args.seed.is_some() {
       tracing::warn!("--generator=none is set, so --seed will be ignored.");
-    } // TODO: somombo> double check this
+    }
     return Ok(None);
   }
 
-  // A generator name was provided, so we must find an executable.
-  let exe_path = if let Some(path) = &args.generator_override_path {
-    // Priority 1: CLI Override
+  // A generator name was provided. Find its base command.
+  let mut base_command = if let Some(path) = &args.generator_override_path {
+    // Priority 1: CLI Override (converts PathBuf to CommandArgs)
     tracing::debug!("Using generator override path: {}", path.display());
-    path.clone()
+    CommandArgs {
+      command: path.clone(),
+      args: vec![],
+    }
   } else if let Some(m) = manifest {
-    // Priority 2: Build Manifest
-    if let Some(path) = m.generators.get(&args.generator) {
-      tracing::debug!("Using generator path from manifest: {}", path.display());
-      path.clone()
+    // Priority 2: Build Manifest (clones CommandArgs)
+    if let Some(cmd) = m.generators.get(&args.generator) {
+      tracing::debug!("Using generator command from manifest");
+      cmd.clone()
     } else {
       // Priority 3: Fail
       let available: Vec<_> = m.generators.keys().collect();
@@ -62,15 +66,12 @@ fn resolve_generator(
   };
 
   // Append seed and passthrough args
-  let mut gen_args = args.generator_args.clone();
   let seed = args.seed.unwrap_or_else(generate_seed);
-  gen_args.push(format!("--seed={}", seed));
+  base_command.args.extend(args.generator_args.clone());
+  base_command.args.push(format!("--seed={}", seed));
   tracing::info!(seed, "Using generator seed");
 
-  Ok(Some(CommandArgs {
-    exe: exe_path,
-    args: gen_args,
-  }))
+  Ok(Some(base_command))
 }
 
 /// Implements the 3-tiered logic for resolving all required algorithm executable paths.
@@ -92,7 +93,8 @@ fn resolve_algorithms(
 
   // Find a path for every language specified in the --algorithms task list
   for lang in tasks.keys() {
-    let exe_path = if let Some(map) = &override_map {
+    // Find the base command for this language
+    let base_command = if let Some(map) = &override_map {
       // Priority 1: CLI Override
       if let Some(path) = map.get(lang) {
         tracing::debug!(
@@ -100,7 +102,10 @@ fn resolve_algorithms(
           lang,
           path.display()
         );
-        Some(path.clone())
+        Some(CommandArgs {
+          command: path.clone(),
+          args: vec![],
+        })
       } else {
         None // No override for *this* language, fall through
       }
@@ -109,16 +114,12 @@ fn resolve_algorithms(
     };
 
     // If override wasn't found, try manifest
-    let exe_path = exe_path.or_else(|| {
+    let base_command = base_command.or_else(|| {
       if let Some(m) = manifest {
         // Priority 2: Build Manifest
-        if let Some(path) = m.algorithm_executables.get(lang) {
-          tracing::debug!(
-            "Using algorithm path from manifest for '{}': {}",
-            lang,
-            path.display()
-          );
-          Some(path.clone())
+        if let Some(cmd) = m.algorithm_executables.get(lang) {
+          tracing::debug!("Using algorithm command from manifest for '{}'", lang);
+          Some(cmd.clone())
         } else {
           None // Not in manifest, fall through to error
         }
@@ -128,14 +129,8 @@ fn resolve_algorithms(
     });
 
     // Check result
-    if let Some(path) = exe_path {
-      resolved_commands.insert(
-        lang.clone(),
-        CommandArgs {
-          exe: path,
-          args: vec![], // Algorithm-specific args come from the --algorithms JSON
-        },
-      );
+    if let Some(cmd) = base_command {
+      resolved_commands.insert(lang.clone(), cmd);
     } else {
       // Priority 3: Fail
       bail!(
@@ -150,13 +145,6 @@ fn resolve_algorithms(
 
 /// Type alias for the map of resolved executable paths: `{"lang": CommandArgs}`
 pub type AlgorithmCommandMap = HashMap<String, CommandArgs>;
-
-/// Holds the executable path and arguments for a component.
-#[derive(Debug, Clone)]
-pub struct CommandArgs {
-  pub exe: PathBuf,
-  pub args: Vec<String>,
-}
 
 /// Type alias for the map of algorithm functions to run: `{"lang": ["func1", "func2"]}`
 pub type Algorithms = HashMap<String, Vec<String>>;

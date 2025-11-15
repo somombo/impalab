@@ -1,4 +1,4 @@
-use crate::config::CommandArgs;
+use crate::command::CommandArgs;
 use crate::config::Config;
 use anyhow::Context;
 use anyhow::Result;
@@ -26,7 +26,7 @@ pub async fn run_benchmarks(config: Config) -> Result<()> {
   let gen_info = if let Some(gen_cmd) = &config.generator_command {
     format!(
       "generator = {}, args = {:?}",
-      gen_cmd.exe.display(),
+      gen_cmd.command.display(),
       gen_cmd.args
     )
   } else {
@@ -49,11 +49,6 @@ pub async fn run_benchmarks(config: Config) -> Result<()> {
           tracing::error!(lang = %language, "Internal error: No command found for language. Skipping.");
           return;
         };
-
-        if !algorithm_cmd_args.exe.exists() {
-          tracing::warn!(lang = %language, path = %algorithm_cmd_args.exe.display(), "Algorithm executable not found. Skipping.");
-          return;
-        }
 
         match run_pipeline(
           config.generator_command.as_ref(),
@@ -81,7 +76,10 @@ pub async fn run_benchmarks(config: Config) -> Result<()> {
 /// Handles both pipelined and self-contained (no generator) runs.
 async fn run_pipeline(
   generator_cmd_args: Option<&CommandArgs>,
-  algorithm_cmd_args: &CommandArgs,
+  CommandArgs {
+    command: algo_cmd_path,
+    args: algo_args,
+  }: &CommandArgs,
   language: &str,
   functions: &[String],
 ) -> Result<()> {
@@ -89,16 +87,24 @@ async fn run_pipeline(
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<()>>> = None;
 
   // --- Configure Algorithm Command ---
-  let mut algo_cmd = Command::new(&algorithm_cmd_args.exe);
+  let functions_arg = format!("--functions={}", functions.join(","));
+
+  let mut algo_cmd = Command::new(algo_cmd_path);
+  algo_cmd
+    .arg(&functions_arg)
+    .args(algo_args) // Add base args from manifest/override
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
 
   // --- Configure Generator (if provided) ---
   if let Some(CommandArgs {
     args: gen_args,
-    exe: gen_exe,
+    command: gen_cmd_path,
   }) = generator_cmd_args
   {
     // --- Pipelined Mode ---
-    let mut gen_cmd = Command::new(gen_exe);
+    let mut gen_cmd = Command::new(gen_cmd_path);
     gen_cmd
       .args(gen_args)
       .stdout(Stdio::piped())
@@ -134,13 +140,6 @@ async fn run_pipeline(
     tracing::debug!("Running algorithm in self-contained mode (no generator)");
     algo_cmd.stdin(Stdio::null());
   }
-
-  let functions_arg = format!("--functions={}", functions.join(","));
-  algo_cmd
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .arg(&functions_arg)
-    .kill_on_drop(true);
 
   // --- Spawn Algorithm Process ---
   tracing::debug!(cmd = ?algo_cmd, "Spawning algorithm component");

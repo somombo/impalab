@@ -1,3 +1,4 @@
+use crate::command::CommandArgs;
 use anyhow::Context;
 use anyhow::Result;
 use serde::Deserialize;
@@ -14,8 +15,8 @@ struct ComponentConfig {
   #[serde(rename = "type")]
   component_type: ComponentType,
   language: Option<String>,
-  build: BuildStep,
-  output: OutputStep,
+  build: Option<BuildStep>,
+  run: CommandArgs,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -31,15 +32,10 @@ struct BuildStep {
   args: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct OutputStep {
-  executable: PathBuf,
-}
-
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct BuildManifest {
-  pub generators: HashMap<String, PathBuf>,
-  pub algorithm_executables: HashMap<String, PathBuf>,
+  pub generators: HashMap<String, CommandArgs>,
+  pub algorithm_executables: HashMap<String, CommandArgs>,
 }
 
 pub async fn build_components(components_dir: PathBuf, manifest_out: PathBuf) -> Result<()> {
@@ -82,46 +78,67 @@ async fn process_component(
   let config: ComponentConfig = toml::from_str(&content)
     .with_context(|| format!("Failed to parse {}", config_path.display()))?;
 
-  tracing::info!(
-    "Building component: {} ({:?})",
-    config.name,
-    config.component_type
-  );
-
-  let status = Command::new(&config.build.command)
-    .args(&config.build.args)
-    .current_dir(base_dir)
-    .status()
-    .with_context(|| format!("Failed to execute build command for {}", config.name))?;
-
-  if !status.success() {
-    anyhow::bail!("Build failed for {}", config.name);
-  }
-
-  let exe_path = base_dir.join(&config.output.executable);
-
-  let exe_path = if cfg!(target_os = "windows") && exe_path.extension().is_none() {
-    let mut p = exe_path.into_os_string();
-    p.push(".exe");
-    PathBuf::from(p)
-  } else {
-    exe_path
-  };
-
-  if !exe_path.exists() {
-    anyhow::bail!(
-      "Build succeeded but output executable not found at: {}",
-      exe_path.display()
+  // Run optional build step
+  if let Some(build_step) = &config.build {
+    tracing::info!(
+      "Building component: {} ({:?})",
+      config.name,
+      config.component_type
     );
+    let status = Command::new(&build_step.command)
+      .args(&build_step.args)
+      .current_dir(base_dir)
+      .status()
+      .with_context(|| format!("Failed to execute build command for {}", config.name))?;
+
+    if !status.success() {
+      anyhow::bail!("Build failed for {}", config.name);
+    }
+  } else {
+    tracing::info!("No build step for {}. Skipping.", config.name);
   }
 
+  // Resolve paths in run command
+  let mut run_command = config.run;
+
+  // Check if command is a relative path to an existing file
+  let potential_cmd_path = base_dir.join(&run_command.command);
+  if potential_cmd_path.exists() && potential_cmd_path.is_file() {
+    run_command.command = potential_cmd_path.canonicalize().context(format!(
+      "Failed to canonicalize command path for {}",
+      config.name
+    ))?;
+  }
+
+  // Check args for relative paths
+  let mut resolved_args = Vec::new();
+  for arg in run_command.args {
+    let potential_arg_path = base_dir.join(&arg);
+    if potential_arg_path.exists() {
+      resolved_args.push(
+        potential_arg_path
+          .canonicalize()
+          .context(format!(
+            "Failed to canonicalize arg path '{}' for {}",
+            arg, config.name
+          ))?
+          .to_string_lossy()
+          .to_string(),
+      );
+    } else {
+      resolved_args.push(arg);
+    }
+  }
+  run_command.args = resolved_args;
+
+  // Store in manifest
   match config.component_type {
     ComponentType::Generator => {
-      manifest.generators.insert(config.name, exe_path);
+      manifest.generators.insert(config.name, run_command);
     }
     ComponentType::Algorithm => {
       if let Some(lang) = config.language {
-        manifest.algorithm_executables.insert(lang, exe_path);
+        manifest.algorithm_executables.insert(lang, run_command);
       } else {
         tracing::warn!(
           "Algorithm component '{}' missing 'language' field. Skipping registration.",
