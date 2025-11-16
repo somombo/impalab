@@ -1,0 +1,6 @@
+name = "py-gen-e2e"
+type = "generator"
+
+[run]
+command = "python3"
+args = ["gen.py"]
