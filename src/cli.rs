@@ -1,7 +1,21 @@
+// Copyright 2025 Chisomo Makombo Sakala
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 use clap::Parser;
 use clap::Subcommand;
 use std::path::PathBuf;
 
+/// Algorithm Benchmarking Orchestrator
 #[derive(Debug, Parser)]
 #[command(version, about = "Algorithm Benchmarking Orchestrator")]
 pub struct Cli {
@@ -9,6 +23,7 @@ pub struct Cli {
   pub command: Commands,
 }
 
+/// Defines the main subcommands: `build` and `run`.
 #[derive(Debug, Subcommand)]
 pub enum Commands {
   /// Scans the components directory and builds all found components.
@@ -26,6 +41,7 @@ pub enum Commands {
   Run(RunArgs),
 }
 
+/// Arguments for the `run` subcommand.
 #[derive(Debug, clap::Args)]
 pub struct RunArgs {
   /// JSON string mapping languages to lists of algorithm names to run.

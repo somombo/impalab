@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_lint:
+    name: Build & Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Rust (Nightly Formatter)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly
+          components: rustfmt
+
+      - name: Check Formatting
+        run: cargo +nightly fmt --check
+
+      - name: Set Stable as default
+        run: rustup default stable
+
+      - name: Install Rust (Stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+      
+      - name: Check Clippy (Linting)
+        run: cargo clippy -- -D warnings # Fails the build on any warnings
+
+      - name: Build Project
+        run: cargo build
+
+      - name: Run Tests
+        run: cargo test

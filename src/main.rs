@@ -1,3 +1,16 @@
+// Copyright 2025 Chisomo Makombo Sakala
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 use Commands::Build;
 use Commands::Run;
 use anyhow::Result;
@@ -24,26 +37,17 @@ async fn main() -> Result<()> {
       manifest_path,
     } => {
       tracing::info!("Starting Build Process...");
-      if let Err(e) = build_components(components_dir, manifest_path).await {
-        tracing::error!(error = %e, "Build failed");
-        return Err(e);
-      }
+
+      build_components(components_dir, manifest_path).await?;
+
       tracing::info!("Build Process Complete.");
     }
     Run(run_args) => {
       tracing::info!("Initializing Benchmark Run...");
-      let config = match Config::try_from(run_args) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-          tracing::error!(error = %e, "Failed to initialize configuration");
-          return Err(e);
-        }
-      };
 
-      if let Err(e) = run_benchmarks(config).await {
-        tracing::error!(error = %e, "Benchmark run failed");
-        return Err(e);
-      }
+      let config = Config::try_from(run_args)?;
+
+      run_benchmarks(config).await?;
     }
   }
 

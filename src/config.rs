@@ -1,26 +1,30 @@
+// Copyright 2025 Chisomo Makombo Sakala
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 use crate::builder::BuildManifest;
 use crate::cli::RunArgs;
 use crate::command::CommandArgs;
-use anyhow::Context;
-use anyhow::Result;
-use anyhow::bail;
-use rand::RngCore;
+use crate::error::ConfigError;
 use serde_json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-/// Generates a secure 64-bit seed.
-fn generate_seed() -> u64 {
-  let mut rng = rand::rng();
-  rng.next_u64()
-}
-
 /// Implements the 3-tiered logic for resolving the generator path.
 fn resolve_generator(
   args: &RunArgs,
   manifest: &Option<BuildManifest>,
-) -> Result<Option<CommandArgs>> {
+) -> Result<Option<CommandArgs>, ConfigError> {
   if args.generator == "none" {
     if args.generator_override_path.is_some() {
       tracing::warn!("--generator=none is set, so --generator-override-path will be ignored.");
@@ -49,24 +53,22 @@ fn resolve_generator(
       cmd.clone()
     } else {
       // Priority 3: Fail
-      let available: Vec<_> = m.generators.keys().collect();
-      bail!(
-        "Generator '{}' not found in manifest. Available generators: {:?}. Or, provide --generator-override-path.",
-        args.generator,
-        available
-      );
+      let available: Vec<_> = m.generators.keys().cloned().collect();
+      return Err(ConfigError::GeneratorNotFound {
+        generator_name: args.generator.clone(),
+        available,
+      });
     }
   } else {
     // Priority 3: Fail (no manifest)
-    bail!(
-      "Generator '{}' not specified via override and no build manifest was found at {}",
-      args.generator,
-      args.manifest_path.display()
-    );
+    return Err(ConfigError::GeneratorOverrideNoManifest {
+      generator_name: args.generator.clone(),
+      manifest_path: args.manifest_path.clone(),
+    });
   };
 
   // Append seed and passthrough args
-  let seed = args.seed.unwrap_or_else(generate_seed);
+  let seed = args.seed.unwrap_or_else(rand::random);
   base_command.args.extend(args.generator_args.clone());
   base_command.args.push(format!("--seed={}", seed));
   tracing::info!(seed, "Using generator seed");
@@ -79,15 +81,14 @@ fn resolve_algorithms(
   args: &RunArgs,
   tasks: &Algorithms,
   manifest: &Option<BuildManifest>,
-) -> Result<AlgorithmCommandMap> {
+) -> Result<AlgorithmCommandMap, ConfigError> {
   // Parse override map (if it exists)
-  let override_map: Option<HashMap<String, PathBuf>> = if let Some(json_str) =
-    &args.algorithm_override_paths
-  {
-    Some(serde_json::from_str(json_str).context("Failed to parse --algorithm-override-paths JSON")?)
-  } else {
-    None
-  };
+  let override_map: Option<HashMap<String, PathBuf>> =
+    if let Some(json_str) = &args.algorithm_override_paths {
+      Some(serde_json::from_str(json_str).map_err(ConfigError::ParseAlgoOverrideJson)?)
+    } else {
+      None
+    };
 
   let mut resolved_commands = HashMap::new();
 
@@ -133,10 +134,9 @@ fn resolve_algorithms(
       resolved_commands.insert(lang.clone(), cmd);
     } else {
       // Priority 3: Fail
-      bail!(
-        "No executable path found for language '{}'. Searched overrides and manifest.",
-        lang
-      );
+      return Err(ConfigError::AlgoExecutableNotFound {
+        language: lang.clone(),
+      });
     }
   }
 
@@ -150,33 +150,40 @@ pub type AlgorithmCommandMap = HashMap<String, CommandArgs>;
 pub type Algorithms = HashMap<String, Vec<String>>;
 
 /// The fully resolved configuration for a benchmark run.
+///
+/// This struct is created from `RunArgs` and the `BuildManifest`
+/// and contains all information needed to execute the benchmark.
 #[derive(Debug)]
 pub struct Config {
+  /// The resolved command for the generator, or `None` if `generator = "none"`.
   pub generator_command: Option<CommandArgs>,
+
+  /// A map of language names to their resolved `CommandArgs`.
   pub algorithm_commands: AlgorithmCommandMap,
+
+  /// The map of tasks (lang -> functions) to run.
   pub algorithms: Algorithms,
 }
 
 impl TryFrom<RunArgs> for Config {
-  type Error = anyhow::Error;
+  type Error = ConfigError;
 
   fn try_from(args: RunArgs) -> Result<Self, Self::Error> {
     // Load Manifest (if it exists)
     let manifest: Option<BuildManifest> = if args.manifest_path.exists() {
-      let content = fs::read_to_string(&args.manifest_path).context(format!(
-        "Failed to read manifest file: {}",
-        args.manifest_path.display()
-      ))?;
-      serde_json::from_str(&content).context("Failed to parse manifest JSON")?
+      let content =
+        fs::read_to_string(&args.manifest_path).map_err(|e| ConfigError::ReadManifest {
+          path: args.manifest_path.clone(),
+          source: e,
+        })?;
+      Some(serde_json::from_str(&content).map_err(ConfigError::ParseManifest)?)
     } else {
       None
     };
 
     // Parse Tasks
-    let algorithms: Algorithms = serde_json::from_str(&args.algorithms).context(format!(
-      "Failed to parse --algorithms JSON   {}",
-      &args.algorithms
-    ))?;
+    let algorithms: Algorithms =
+      serde_json::from_str(&args.algorithms).map_err(ConfigError::ParseAlgorithmsJson)?;
 
     // Resolve Generator (Priority: Override -> Manifest -> Fail)
     let generator_command = resolve_generator(&args, &manifest)?;
@@ -189,5 +196,187 @@ impl TryFrom<RunArgs> for Config {
       generator_command,
       algorithm_commands,
     })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::builder::BuildManifest;
+  use crate::cli::RunArgs;
+  use crate::command::CommandArgs;
+  use std::collections::HashMap;
+  use std::path::PathBuf;
+
+  // Helper to create mock RunArgs
+  fn mock_run_args() -> RunArgs {
+    RunArgs {
+      algorithms: "{}".to_string(),
+      seed: None,
+      generator: "default-gen".to_string(),
+      generator_override_path: None,
+      algorithm_override_paths: None,
+      manifest_path: PathBuf::from("impa_manifest.json"),
+      generator_args: vec![],
+    }
+  }
+
+  // Helper to create a mock BuildManifest
+  fn mock_manifest() -> BuildManifest {
+    let mut generators = HashMap::new();
+    generators.insert(
+      "default-gen".to_string(),
+      CommandArgs {
+        command: PathBuf::from("/bin/manifest-gen"),
+        args: vec!["--from-manifest".to_string()],
+      },
+    );
+
+    let mut algorithm_executables = HashMap::new();
+    algorithm_executables.insert(
+      "cpp".to_string(),
+      CommandArgs {
+        command: PathBuf::from("/bin/manifest-cpp"),
+        args: vec![],
+      },
+    );
+    algorithm_executables.insert(
+      "rust".to_string(),
+      CommandArgs {
+        command: PathBuf::from("/bin/manifest-rust"),
+        args: vec![],
+      },
+    );
+
+    BuildManifest {
+      generators,
+      algorithm_executables,
+    }
+  }
+
+  // ---------------------------------
+  // Tests for resolve_generator
+  // ---------------------------------
+
+  #[test]
+  fn test_gen_priority_1_override_path() {
+    let mut args = mock_run_args();
+    args.generator_override_path = Some(PathBuf::from("/bin/override-gen"));
+
+    let manifest = Some(mock_manifest());
+
+    let cmd = resolve_generator(&args, &manifest).unwrap().unwrap();
+
+    // Should use the override path
+    assert_eq!(cmd.command, PathBuf::from("/bin/override-gen"));
+    // Should NOT have args from manifest
+    assert!(!cmd.args.contains(&"--from-manifest".to_string()));
+    // Should contain the seed
+    assert!(cmd.args.iter().any(|s| s.starts_with("--seed=")));
+  }
+
+  #[test]
+  fn test_gen_priority_2_manifest() {
+    let args = mock_run_args(); // No override
+    let manifest = Some(mock_manifest());
+
+    let cmd = resolve_generator(&args, &manifest).unwrap().unwrap();
+
+    // Should use the manifest path
+    assert_eq!(cmd.command, PathBuf::from("/bin/manifest-gen"));
+    // Should have args from manifest
+    assert!(cmd.args.contains(&"--from-manifest".to_string()));
+    // Should contain the seed
+    assert!(cmd.args.iter().any(|s| s.starts_with("--seed=")));
+  }
+
+  #[test]
+  fn test_gen_priority_3_fail_not_found() {
+    let mut args = mock_run_args();
+    args.generator = "missing-gen".to_string(); // Not in manifest
+    let manifest = Some(mock_manifest());
+
+    let err = resolve_generator(&args, &manifest).unwrap_err();
+
+    // Should fail with a helpful error
+    assert!(
+      err
+        .to_string()
+        .contains("Generator 'missing-gen' not found in manifest")
+    );
+  }
+
+  #[test]
+  fn test_gen_none() {
+    let mut args = mock_run_args();
+    args.generator = "none".to_string();
+    args.generator_override_path = Some(PathBuf::from("/bin/override-gen")); // Will be ignored
+    args.seed = Some(12345); // Will be ignored
+
+    let manifest = Some(mock_manifest());
+
+    // Should return Ok(None)
+    let cmd = resolve_generator(&args, &manifest).unwrap();
+    assert!(cmd.is_none());
+  }
+
+  // ---------------------------------
+  // Tests for resolve_algorithms
+  // ---------------------------------
+
+  #[test]
+  fn test_algo_priority_1_override_path() {
+    let mut args = mock_run_args();
+    // Override "cpp", but not "rust"
+    args.algorithm_override_paths = Some(r#"{"cpp": "/bin/override-cpp"}"#.to_string());
+
+    let tasks: Algorithms =
+      serde_json::from_str(r#"{"cpp": ["func1"], "rust": ["func2"]}"#).unwrap();
+    let manifest = Some(mock_manifest());
+
+    let map = resolve_algorithms(&args, &tasks, &manifest).unwrap();
+
+    // "cpp" should come from the override
+    assert_eq!(
+      map.get("cpp").unwrap().command,
+      PathBuf::from("/bin/override-cpp")
+    );
+    // "rust" should fall back to the manifest
+    assert_eq!(
+      map.get("rust").unwrap().command,
+      PathBuf::from("/bin/manifest-rust")
+    );
+  }
+
+  #[test]
+  fn test_algo_priority_2_manifest() {
+    let args = mock_run_args(); // No overrides
+    let tasks: Algorithms = serde_json::from_str(r#"{"cpp": ["func1"]}"#).unwrap();
+    let manifest = Some(mock_manifest());
+
+    let map = resolve_algorithms(&args, &tasks, &manifest).unwrap();
+
+    // "cpp" should come from the manifest
+    assert_eq!(
+      map.get("cpp").unwrap().command,
+      PathBuf::from("/bin/manifest-cpp")
+    );
+  }
+
+  #[test]
+  fn test_algo_priority_3_fail_not_found() {
+    let args = mock_run_args(); // No overrides
+    // Request "python", which is not in the manifest
+    let tasks: Algorithms = serde_json::from_str(r#"{"python": ["func1"]}"#).unwrap();
+    let manifest = Some(mock_manifest());
+
+    let err = resolve_algorithms(&args, &tasks, &manifest).unwrap_err();
+
+    // Should fail with a helpful error
+    assert!(
+      err
+        .to_string()
+        .contains("No executable path found for language 'python'")
+    );
   }
 }
