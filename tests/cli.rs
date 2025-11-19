@@ -34,6 +34,7 @@ fn test_build_no_components() {
     .arg(temp.path())
     .arg("--manifest-path")
     .arg(temp.path().join("test_manifest.json"))
+    .env("RUST_LOG", "info")
     .env("CLICOLOR", "0");
 
   cmd
@@ -84,6 +85,7 @@ fn test_build_and_run_e2e() {
     .arg(&components_dir)
     .arg("--manifest-path")
     .arg(&manifest_path)
+    .env("RUST_LOG", "info")
     .env("CLICOLOR", "0");
 
   // Assert build success

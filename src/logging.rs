@@ -26,7 +26,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 ///
 /// Log level is controlled by the `RUST_LOG` env var (e.g., `RUST_LOG=info`).
 pub fn setup_tracing() -> Result<()> {
-  let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+  let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
   match env::var("BENCH_LOG_FILE") {
     Ok(log_file) if !log_file.is_empty() => {
