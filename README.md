@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Impalab Logo" width="200"/>
+</p>
+
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 
 # Impalab
@@ -6,13 +10,13 @@ Impalab is a language-agnostic framework for orchestrating micro-benchmarks. It 
 
 This design makes it simple to perform both:
 
-* **Inter-language benchmarking**: Compare the performance of the same algorithm (e.g., `linear_search`) in Zig vs. Python.
-* **Intra-language benchmarking**: Compare the performance of different algorithms (e.g., `linear_search` vs. `binary_search`) within the same language.
+- **Inter-language benchmarking**: Compare the performance of the same algorithm (e.g., `linear_search`) in Zig vs. Python.
+- **Intra-language benchmarking**: Compare the performance of different algorithms (e.g., `linear_search` vs. `binary_search`) within the same language.
 
 The core of Impalab is the `impa` CLI, a Rust-based orchestrator that manages two types of components:
 
-* **Generators**: Programs that generate test data (e.g., random numbers, strings) and print it to `stdout`.
-* **Algorithms**: Programs that read data from `stdin`, run one or more named functions against it, and print performance results to `stdout`.
+- **Generators**: Programs that generate test data (e.g., random numbers, strings) and print it to `stdout`.
+- **Algorithms**: Programs that read data from `stdin`, run one or more named functions against it, and print performance results to `stdout`.
 
 ## Core Concept
 
@@ -31,6 +35,7 @@ The `impafile.toml` defines the component's name, type, andâ€”most importantlyâ€
 This component has a `[build]` step to create a binary, and the `[run]` command points to the resulting executable.
 
 `my_zig_algos/impafile.toml`:
+
 ```toml
 name = "zig-algos"
 type = "algorithm"
@@ -84,10 +89,10 @@ To work with Impalab, your component executables must follow a simple interface.
 
 ### Generator Executable
 
-  * **Must** accept a `--seed=<u64>` argument, which will be provided by `impa`. This ensures that the exact same data is generated for each run, allowing for fair comparisons when testing across different languages.
-  * **May** accept any number of custom arguments, which are passed through by the `impa run` command. These are used to control the *characteristics* of the test data (e.g., `--size=10000`).
-  * **Must** print its generated data to `stdout`. Each line represents a single test case, starting with a unique `id`.
-  * `stderr` will be captured and forwarded by `impa` for logging.
+- **Must** accept a `--seed=<u64>` argument, which will be provided by `impa`. This ensures that the exact same data is generated for each run, allowing for fair comparisons when testing across different languages.
+- **May** accept any number of custom arguments, which are passed through by the `impa run` command. These are used to control the _characteristics_ of the test data (e.g., `--size=10000`).
+- **Must** print its generated data to `stdout`. Each line represents a single test case, starting with a unique `id`.
+- `stderr` will be captured and forwarded by `impa` for logging.
 
 **Example Output (from the TypeScript generator):**
 
@@ -98,17 +103,17 @@ run_2 4 9 2 7 4 6
 
 In this convention, each line is a test case.
 
-  * `run_1` is the unique **ID**.
-  * `8` is the "needle" to search for.
-  * `10 5 3 8 1` is the "haystack" to search in.
+- `run_1` is the unique **ID**.
+- `8` is the "needle" to search for.
+- `10 5 3 8 1` is the "haystack" to search in.
 
 ### Algorithm Executable
 
-  * **Must** accept a `--functions=<list>` argument (e.g., `--functions=linear_search,binary_search`).
-  * **Must** read test cases line-by-line from `stdin`.
-  * **Must** understand the data format from the generator (e.g., parse the **ID**, "needle", and "haystack" from each line).
-  * **Must** print results to `stdout` in a simple CSV format: `id,function_name,duration_nanos`. The `id` *must* match the one received from the generator.
-  * `stderr` will be captured and forwarded by `impa` for logging.
+- **Must** accept a `--functions=<list>` argument (e.g., `--functions=linear_search,binary_search`).
+- **Must** read test cases line-by-line from `stdin`.
+- **Must** understand the data format from the generator (e.g., parse the **ID**, "needle", and "haystack" from each line).
+- **Must** print results to `stdout` in a simple CSV format: `id,function_name,duration_nanos`. The `id` _must_ match the one received from the generator.
+- `stderr` will be captured and forwarded by `impa` for logging.
 
 **Example Output (from the Zig algorithm):**
 (This output corresponds to the generator input above)
@@ -164,9 +169,9 @@ impa run \
     --size 10000
 ```
 
-  * `--generator "search-ints-deno"`: Use the generator named in its `impafile.toml`.
-  * `--algorithms '...'`: A JSON map of `language` to a list of function names to run.
-  * `--`: All arguments after this are passed directly to the generator (`search-ints-deno`).
+- `--generator "search-ints-deno"`: Use the generator named in its `impafile.toml`.
+- `--algorithms '...'`: A JSON map of `language` to a list of function names to run.
+- `--`: All arguments after this are passed directly to the generator (`search-ints-deno`).
 
 Notice how this single command performs both **intra-language** benchmarking (comparing `linear_search` vs. `binary_search` for the `"zig"` language) and **inter-language** benchmarking (comparing the Zig `linear_search` against Python's `linear_search_py`).
 
@@ -203,8 +208,8 @@ This JSONL format is designed for easy consumption. While you can pipe it to too
 
 Scans for `impafile.toml` files, runs their build commands, and creates a JSON manifest.
 
-  * `--components-dir <PATH>`: The root directory containing component subdirectories. (Default: `.`)
-  * `--manifest-path <PATH>`: The output path for the build manifest. (Default: `impa_manifest.json`)
+- `--components-dir <PATH>`: The root directory containing component subdirectories. (Default: `.`)
+- `--manifest-path <PATH>`: The output path for the build manifest. (Default: `impa_manifest.json`)
 
 ### `impa run`
 
@@ -212,26 +217,26 @@ Runs the benchmark using the specified components and manifest.
 
 **Key Arguments:**
 
-  * `--algorithms <JSON_STRING>`: (Required) A JSON string mapping languages to a list of function names to run.
-      * Example: `'{"zig": ["linear_search", "binary_search"], "python": ["linear_search_py"]}'`
-  * `--generator <NAME>`: (Required) The name of the generator component to use (must match a name in the manifest), or `none` for self-contained algorithms.
-  * `--manifest-path <PATH>`: Path to the build manifest. (Default: `impa_manifest.json`)
-  * `--seed <u64>`: (Optional) A specific seed for the random number generator.
-  * `[generator_args]...`: Any arguments after `--` are passed directly to the generator executable.
+- `--algorithms <JSON_STRING>`: (Required) A JSON string mapping languages to a list of function names to run.
+  - Example: `'{"zig": ["linear_search", "binary_search"], "python": ["linear_search_py"]}'`
+- `--generator <NAME>`: (Required) The name of the generator component to use (must match a name in the manifest), or `none` for self-contained algorithms.
+- `--manifest-path <PATH>`: Path to the build manifest. (Default: `impa_manifest.json`)
+- `--seed <u64>`: (Optional) A specific seed for the random number generator.
+- `[generator_args]...`: Any arguments after `--` are passed directly to the generator executable.
 
 **Override Arguments:**
 You can bypass the manifest file by providing direct paths to executables:
 
-  * `--generator-override-path <PATH>`: Use this executable for the generator.
-  * `--algorithm-override-paths <JSON_MAP>`: A JSON string mapping a language to a specific executable path.
-      * Example: `'{"zig": "./my_zig_exe", "python": "./main.py"}'`
+- `--generator-override-path <PATH>`: Use this executable for the generator.
+- `--algorithm-override-paths <JSON_MAP>`: A JSON string mapping a language to a specific executable path.
+  - Example: `'{"zig": "./my_zig_exe", "python": "./main.py"}'`
 
 ## Logging
 
 Logging is configured via environment variables:
 
-  * `RUST_LOG`: Sets the log level (e.g., `RUST_LOG=info`, `RUST_LOG=debug`). Defaults to `info`.
-  * `BENCH_LOG_FILE`: If set, logs are written to this file instead of `stderr`.
+- `RUST_LOG`: Sets the log level (e.g., `RUST_LOG=info`, `RUST_LOG=debug`). Defaults to `info`.
+- `BENCH_LOG_FILE`: If set, logs are written to this file instead of `stderr`.
 
 ## License
 
