@@ -1,12 +1,21 @@
 [package]
 name = "impalab"
 version = "0.2.0"
+authors = ["Chisomo Makombo Sakala"]
 edition = "2024"
 description = "A language-agnostic framework for orchestrating micro-benchmarks."
 repository = "https://github.com/somombo/impalab"
 license = "Apache-2.0"
 keywords = ["benchmark", "cli", "orchestration", "performance", "testing"]
 categories = ["command-line-utilities", "development-tools"]
+
+[package.metadata.release]
+publish = false
+tag-prefix = "v"
+tag-name = "{{version}}"
+sign-commit = true
+sign-tag = true
+allow-branch = ["main"]
 
 [[bin]]
 name = "impa"
