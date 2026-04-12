@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::command::CommandArgs;
 use crate::config::Config;
+use crate::config::Task;
 use crate::error::BenchmarkError;
 use serde::Deserialize;
 use serde::Serialize;
@@ -56,30 +57,30 @@ pub async fn run_benchmarks(config: Config) -> Result<(), BenchmarkError> {
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for (language, functions) in &config.algorithms {
-      let lang_span = tracing::info_span!("run_language", lang = %language);
+    for task in &config.tasks {
+      let executor = &task.executor;
+      let lang_span = tracing::info_span!("run_language", executor = %executor);
       let result = async {
-        tracing::info!("Running natively for: {}...", language);
+        tracing::info!("Running natively for: {}...", executor);
 
-        let Some(algorithm_cmd_args) = config.algorithm_commands.get(language) else {
-          tracing::error!(lang = %language, "Internal error: No command found for language. Skipping.");
-          return Err(BenchmarkError::NoCommandForLanguage { language: language.clone() });
+        let Some(algorithm_cmd_args) = config.algorithm_commands.get(executor) else {
+          tracing::error!(executor = %executor, "Internal error: No command found for language. Skipping.");
+          return Err(BenchmarkError::NoCommandForLanguage { language: executor.clone() });
         };
 
         match run_pipeline(
           config.generator_command.as_ref(),
           algorithm_cmd_args,
-          language,
-          functions,
+          task,
         )
         .await
         {
           Ok(_) => {
-            tracing::info!("Finished running pipeline: {}", language);
+            tracing::info!("Finished running pipeline: {}", executor);
             Ok(())
           }
           Err(e) => {
-            tracing::error!(error = %e, "Pipeline failed for language: {}", language);
+            tracing::error!(error = %e, "Pipeline failed for language: {}", executor);
             Err(e) // Propagate the error
           }
         }
@@ -104,19 +105,23 @@ async fn run_pipeline(
     command: algo_cmd_path,
     args: algo_args,
   }: &CommandArgs,
-  language: &str,
-  functions: &[String],
+  Task {
+    executor,
+    target,
+    args: kwags,
+  }: &Task,
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
 
   // --- Configure Algorithm Command ---
-  let functions_arg = format!("--functions={}", functions.join(","));
+  let task_args: Vec<String> = kwags.iter().map(|(k, v)| format!("--{k}={v}")).collect();
 
   let mut algo_cmd = Command::new(algo_cmd_path);
   algo_cmd
     .args(algo_args) // Add base args from manifest/override
-    .arg(&functions_arg)
+    .arg(target)
+    .args(task_args)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(true);
@@ -182,11 +187,11 @@ async fn run_pipeline(
     .ok_or(BenchmarkError::PipeAlgoStderr)?;
 
   // --- Concurrently process all IO ---
-  let lang_clone = language.to_string();
+  let lang_clone = executor.to_string();
 
   let stdout_task = tokio::spawn(
     async move { process_algorithm_stdout(algo_stdout, &lang_clone).await }
-      .instrument(tracing::info_span!("stdout_handler", lang = %language)),
+      .instrument(tracing::info_span!("stdout_handler", executor = %executor)),
   );
 
   let algo_stderr_task = tokio::spawn(
