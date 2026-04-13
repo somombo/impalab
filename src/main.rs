@@ -35,12 +35,11 @@ async fn main() -> Result<()> {
     Build {
       components_dir,
       manifest_path,
-      include: _,
-      exclude: _,
+      filter_args,
     } => {
       tracing::info!("Starting Build Process...");
 
-      build_components(components_dir, manifest_path)?;
+      build_components(components_dir, manifest_path, &filter_args)?;
 
       tracing::info!("Build Process Complete.");
     }

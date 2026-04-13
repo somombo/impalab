@@ -36,15 +36,21 @@ pub enum Commands {
     #[arg(long, default_value = "impa_manifest.json")]
     manifest_path: PathBuf,
 
-    #[arg(long, value_delimiter = ',')]
-    include: Option<Vec<String>>,
-
-    #[arg(long, conflicts_with = "include", value_delimiter = ',')]
-    exclude: Option<Vec<String>>,
+    #[command(flatten)]
+    filter_args: FilterArgs,
   },
 
   /// Runs the benchmark using built components.
   Run(RunArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FilterArgs {
+  #[arg(long, value_delimiter = ',')]
+  pub include: Option<Vec<String>>,
+
+  #[arg(long, conflicts_with = "include", value_delimiter = ',')]
+  pub exclude: Option<Vec<String>>,
 }
 
 /// Arguments for the `run` subcommand.

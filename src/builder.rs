@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::cli::FilterArgs;
 use crate::command::CommandArgs;
 use crate::error::BuildError;
 use serde::Deserialize;
@@ -74,6 +75,7 @@ pub struct BuildManifest {
 pub fn build_components(
   components_dir: PathBuf,
   manifest_out: PathBuf,
+  filter_args: &FilterArgs,
 ) -> Result<(), BuildError> {
   tracing::info!("Scanning for components in {}", components_dir.display());
 
@@ -90,7 +92,7 @@ pub fn build_components(
     if path.is_dir() {
       let config_path = path.join("impafile.toml");
       if config_path.exists() {
-        process_component(&path, &config_path, &mut manifest)?;
+        process_component(&path, &config_path, &mut manifest, filter_args)?;
       }
     }
   }
@@ -106,11 +108,22 @@ fn process_component(
   base_dir: &Path,
   config_path: &Path,
   manifest: &mut BuildManifest,
+  filter_args: &FilterArgs,
 ) -> Result<(), BuildError> {
   let content = fs::read_to_string(config_path).map_err(BuildError::ReadConfig)?;
   let impafile: Impafile = toml::from_str(&content).map_err(BuildError::TomlParse)?;
 
   for config in impafile.components {
+    if let Some(es) = &filter_args.exclude
+      && es.contains(&config.name)
+    {
+      continue;
+    } else if let Some(is) = &filter_args.include
+      && !is.contains(&config.name)
+    {
+      continue;
+    }
+
     // Run optional build step
     if let Some(build_step) = &config.build {
       tracing::info!(
