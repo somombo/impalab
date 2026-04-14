@@ -12,16 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::cli::FilterArgs;
-use crate::command::CommandArgs;
+use crate::cli::ManifestArg;
 use crate::error::BuildError;
+use crate::manifest::BuildManifest;
+use crate::manifest::ComponentType;
+use crate::manifest::ManifestComponent;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Output;
+
+/// Holds the executable command and base arguments for a component.
+///
+/// This struct is the "contract" for a runnable component, stored
+/// in the `impa_manifest.json` and used by the orchestrator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CommandArgs {
+  /// The command to execute (e.g., "python3" or "/path/to/binary").
+  command: PathBuf,
+
+  /// A list of base arguments to pass to the command (e.g., ["./run.py"]).
+  #[serde(default)]
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  args: Vec<String>,
+}
 
 #[derive(Debug, Deserialize)]
 struct ComponentConfig {
@@ -36,37 +54,6 @@ struct Impafile {
   components: Vec<ComponentConfig>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum ComponentType {
-  Generator,
-  Executor,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ManifestComponent {
-  #[serde(rename = "type")]
-  pub component_type: ComponentType,
-  pub command: PathBuf,
-  pub args: Vec<String>,
-}
-
-impl From<&ManifestComponent> for CommandArgs {
-  fn from(cmp: &ManifestComponent) -> Self {
-    CommandArgs {
-      command: cmp.command.clone(),
-      args: cmp.args.clone(),
-    }
-  }
-}
-
-/// Defines the structure of the `impa_manifest.json` file.
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct BuildManifest {
-  /// A map of language names to their runnable `CommandArgs`.
-  pub components: HashMap<String, ManifestComponent>,
-}
-
 /// Scans a directory for components and runs their build steps.
 ///
 /// This function finds all `impafile.toml` files in the `components_dir`,
@@ -74,9 +61,10 @@ pub struct BuildManifest {
 /// at `manifest_out`.
 pub fn build_components(
   components_dir: PathBuf,
-  manifest_out: PathBuf,
+  manifest_arg: ManifestArg,
   filter_args: &FilterArgs,
 ) -> Result<(), BuildError> {
+  let manifest_out: PathBuf = manifest_arg.path();
   tracing::info!("Scanning for components in {}", components_dir.display());
 
   if !components_dir.exists() {
@@ -87,12 +75,20 @@ pub fn build_components(
 
   for entry in fs::read_dir(&components_dir).map_err(BuildError::ReadDir)? {
     let entry = entry.map_err(BuildError::ReadDir)?;
-    let path = entry.path();
+    let path: PathBuf = entry.path();
 
     if path.is_dir() {
       let config_path = path.join("impafile.toml");
-      if config_path.exists() {
-        process_component(&path, &config_path, &mut manifest, filter_args)?;
+      if config_path.exists() && config_path.is_file() {
+        let path_canon: PathBuf =
+          path
+            .canonicalize()
+            .map_err(|e| BuildError::CanonicalizePath {
+              path: path.clone(),
+              source: e,
+            })?;
+
+        process_component(&manifest_arg, &path_canon, &mut manifest, filter_args)?;
       }
     }
   }
@@ -105,12 +101,13 @@ pub fn build_components(
 }
 
 fn process_component(
+  manifest_arg: &ManifestArg,
   base_dir: &Path,
-  config_path: &Path,
   manifest: &mut BuildManifest,
   filter_args: &FilterArgs,
 ) -> Result<(), BuildError> {
-  let content = fs::read_to_string(config_path).map_err(BuildError::ReadConfig)?;
+  let content =
+    fs::read_to_string(base_dir.join("impafile.toml")).map_err(BuildError::ReadConfig)?;
   let impafile: Impafile = toml::from_str(&content).map_err(BuildError::TomlParse)?;
 
   for config in impafile.components {
@@ -159,53 +156,34 @@ fn process_component(
       tracing::info!("No build step for {}. Skipping.", config.name);
     }
 
-    // Resolve paths in run command
-    let mut run_command = config.run;
-
-    // Check if command is a relative path to an existing file
-    let potential_cmd_path = base_dir.join(&run_command.command);
-    if potential_cmd_path.exists() && potential_cmd_path.is_file() {
-      run_command.command =
-        potential_cmd_path
-          .canonicalize()
-          .map_err(|e| BuildError::CanonicalizePath {
-            component_name: config.name.clone(),
-            path: potential_cmd_path,
-            source: e,
-          })?;
-    }
-
-    // Check args for relative paths
-    let mut resolved_args = Vec::new();
-    for arg in run_command.args {
-      let potential_arg_path = base_dir.join(&arg);
-      if potential_arg_path.exists() {
-        resolved_args.push(
-          potential_arg_path
+    match manifest.components.entry(config.name) {
+      Entry::Occupied(entry) => {
+        return Err(BuildError::DuplicateComponentName {
+          component_name: entry.key().to_owned(),
+        });
+      }
+      Entry::Vacant(entry) => {
+        let manifest_dir: PathBuf =
+          manifest_arg
+            .dir
             .canonicalize()
             .map_err(|e| BuildError::CanonicalizePath {
-              component_name: config.name.clone(),
-              path: potential_arg_path,
+              path: manifest_arg.path(),
               source: e,
-            })?
-            .to_string_lossy()
-            .to_string(),
-        );
-      } else {
-        resolved_args.push(arg);
+            })?;
+
+        let cmp_relpath = pathdiff::diff_paths(base_dir, &manifest_dir)
+          .ok_or_else(|| BuildError::PathDiff(base_dir.to_owned(), manifest_dir))?;
+
+        // Store in manifest
+        entry.insert(ManifestComponent {
+          component_type: config.component_type,
+          command: config.run.command,
+          args: config.run.args,
+          dir: cmp_relpath,
+        });
       }
     }
-    run_command.args = resolved_args;
-
-    // Store in manifest
-    manifest.components.insert(
-      config.name,
-      ManifestComponent {
-        component_type: config.component_type,
-        command: run_command.command,
-        args: run_command.args,
-      },
-    );
   }
 
   Ok(())

@@ -64,9 +64,8 @@ pub enum BuildError {
     source: std::io::Error,
   },
 
-  #[error("Failed to canonicalize path for {component_name}: {path}")]
+  #[error("Failed to canonicalize path: {path}")]
   CanonicalizePath {
-    component_name: String,
     path: PathBuf,
     #[source]
     source: std::io::Error,
@@ -77,6 +76,12 @@ pub enum BuildError {
 
   #[error("Failed to serialize manifest")]
   SerializeManifest(#[from] serde_json::Error),
+
+  #[error("Failed determine the difference between paths: {0} and {1}")]
+  PathDiff(PathBuf, PathBuf),
+
+  #[error("Build failed for component: {component_name}. Components should have unique names.")]
+  DuplicateComponentName { component_name: String },
 }
 
 /// Errors related to configuration resolution (src/config.rs).
@@ -97,6 +102,12 @@ pub enum ConfigError {
 
   #[error("Failed to parse --algorithm-override-paths JSON: {0}")]
   ParseAlgoOverrideJson(#[source] serde_json::Error),
+
+  #[error("Executor component should be of `ComponentType::Executor`")]
+  ExecutorIncorrectComponentType,
+
+  #[error("Generating component should be of `ComponentType::Generator`")]
+  GeneratorIncorrectComponentType,
 
   #[error(
     "Generator '{generator_name}' not found in manifest. Available: {available:?}. Or, provide --generator-override-path."

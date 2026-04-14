@@ -11,10 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::command::CommandArgs;
 use crate::config::Config;
 use crate::config::Task;
 use crate::error::BenchmarkError;
+use crate::manifest::ManifestComponent;
 use serde::Deserialize;
 use serde::Serialize;
 use std::process::Stdio;
@@ -100,11 +100,13 @@ pub async fn run_benchmarks(config: Config) -> Result<(), BenchmarkError> {
 /// Spawns and manages the generator -> algorithm pipeline for one language.
 /// Handles both pipelined and self-contained (no generator) runs.
 async fn run_pipeline(
-  generator_cmd_args: Option<&CommandArgs>,
-  CommandArgs {
+  generator_cmd_args: Option<&ManifestComponent>,
+  ManifestComponent {
     command: algo_cmd_path,
     args: algo_args,
-  }: &CommandArgs,
+    component_type: _algo_component_type,
+    dir: algo_dir,
+  }: &ManifestComponent,
   Task {
     executor,
     target,
@@ -122,20 +124,24 @@ async fn run_pipeline(
     .args(algo_args) // Add base args from manifest/override
     .arg(target)
     .args(task_args)
+    .current_dir(algo_dir)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(true);
 
   // --- Configure Generator (if provided) ---
-  if let Some(CommandArgs {
+  if let Some(ManifestComponent {
     args: gen_args,
     command: gen_cmd_path,
+    component_type: _gen_component_type,
+    dir: gen_dir,
   }) = generator_cmd_args
   {
     // --- Pipelined Mode ---
     let mut gen_cmd = Command::new(gen_cmd_path);
     gen_cmd
       .args(gen_args)
+      .current_dir(gen_dir)
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())
       .kill_on_drop(true);

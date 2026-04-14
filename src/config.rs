@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::builder::BuildManifest;
-use crate::builder::ComponentType;
 use crate::cli::RunArgs;
-use crate::command::CommandArgs;
 use crate::error::ConfigError;
+use crate::manifest::BuildManifest;
+use crate::manifest::ComponentType;
+use crate::manifest::ManifestComponent;
 use serde::Deserialize;
 use serde_json;
 use std::collections::BTreeMap;
@@ -27,7 +27,7 @@ use std::path::PathBuf;
 fn resolve_generator(
   args: &RunArgs,
   manifest: &Option<BuildManifest>,
-) -> Result<Option<CommandArgs>, ConfigError> {
+) -> Result<Option<ManifestComponent>, ConfigError> {
   if args.generator == "none" {
     if !args.generator_args.is_empty() {
       tracing::warn!("--generator=none is set, so trailing generator arguments will be ignored.");
@@ -39,22 +39,22 @@ fn resolve_generator(
   }
 
   // A generator name was provided. Find its base command.
-  let mut base_command: CommandArgs = if let Some(m) = manifest {
+  let mut base_command: ManifestComponent = if let Some(m) = manifest {
     // Priority 2: Build Manifest (clones CommandArgs)
     if let Some(cmd) = m.components.get(&args.generator) {
       tracing::debug!("Using generator command from manifest");
-      if cmd.component_type != crate::builder::ComponentType::Generator {
-        todo!("Generating component should be of `ComponentType::Generator`"); // TODO: replace this with custom error from error.rs
+      if cmd.component_type != ComponentType::Generator {
+        return Err(ConfigError::GeneratorIncorrectComponentType);
       }
 
-      cmd.into()
+      cmd.to_owned()
     } else {
       // Priority 3: Fail
       let available: Vec<_> = m
         .components
         .iter()
         .filter(|(_, c)| c.component_type == ComponentType::Generator)
-        .map(|(k, _)| k.clone())
+        .map(|(k, _)| k.to_owned())
         .collect();
       return Err(ConfigError::GeneratorNotFound {
         generator_name: args.generator.clone(),
@@ -65,7 +65,7 @@ fn resolve_generator(
     // Priority 3: Fail (no manifest)
     return Err(ConfigError::GeneratorOverrideNoManifest {
       generator_name: args.generator.clone(),
-      manifest_path: args.manifest_path.clone(),
+      manifest_path: args.manifest.path(),
     });
   };
 
@@ -75,6 +75,7 @@ fn resolve_generator(
   base_command.args.push(format!("--seed={}", seed));
   tracing::info!(seed, "Using generator seed");
 
+  base_command.dir = args.manifest.dir.join(base_command.dir);
   Ok(Some(base_command))
 }
 
@@ -106,9 +107,11 @@ fn resolve_algorithms(
           executor,
           path.display()
         );
-        Some(CommandArgs {
+        Some(ManifestComponent {
           command: path.clone(),
           args: vec![],
+          component_type: ComponentType::Executor,
+          dir: PathBuf::new(),
         })
       } else {
         None // No override for *this* language, fall through
@@ -118,36 +121,42 @@ fn resolve_algorithms(
     };
 
     // If override wasn't found, try manifest
-    let base_command = base_command.or_else(|| {
-      if let Some(m) = manifest {
-        // Priority 2: Build Manifest
-        if let Some(cmd) = m.components.get(executor) {
-          tracing::debug!("Using algorithm command from manifest for '{}'", executor);
-          Some(cmd.into())
+    let mut base_command = match base_command {
+      Some(b) => Ok(b),
+      None => {
+        if let Some(m) = manifest {
+          // Priority 2: Build Manifest
+          if let Some(cmd) = m.components.get(executor) {
+            tracing::debug!("Using algorithm command from manifest for '{}'", executor);
+            if cmd.component_type != ComponentType::Executor {
+              Err(ConfigError::ExecutorIncorrectComponentType)
+            } else {
+              Ok(cmd.to_owned())
+            }
+          } else {
+            // Not in manifest, fall through to error
+            Err(ConfigError::AlgoExecutableNotFound {
+              language: executor.clone(),
+            })
+          }
         } else {
-          None // Not in manifest, fall through to error
+          // No manifest, fall through to error
+          Err(ConfigError::AlgoExecutableNotFound {
+            language: executor.clone(),
+          })
         }
-      } else {
-        None // No manifest, fall through to error
       }
-    });
+    }?;
 
-    // Check result
-    if let Some(cmd) = base_command {
-      resolved_commands.insert(executor.clone(), cmd);
-    } else {
-      // Priority 3: Fail
-      return Err(ConfigError::AlgoExecutableNotFound {
-        language: executor.clone(),
-      });
-    }
+    base_command.dir = args.manifest.dir.join(base_command.dir);
+    resolved_commands.insert(executor.clone(), base_command);
   }
 
   Ok(resolved_commands)
 }
 
 /// Type alias for the map of resolved executable paths: `{"lang": CommandArgs}`
-pub type AlgorithmCommandMap = HashMap<String, CommandArgs>;
+pub type AlgorithmCommandMap = HashMap<String, ManifestComponent>;
 
 #[derive(Debug, Deserialize)]
 pub struct Task {
@@ -166,7 +175,7 @@ pub type Tasks = Vec<Task>;
 #[derive(Debug)]
 pub struct Config {
   /// The resolved command for the generator, or `None` if `generator = "none"`.
-  pub generator_command: Option<CommandArgs>,
+  pub generator_command: Option<ManifestComponent>,
 
   /// A map of language names to their resolved `CommandArgs`.
   pub algorithm_commands: AlgorithmCommandMap,
@@ -180,12 +189,14 @@ impl TryFrom<RunArgs> for Config {
 
   fn try_from(args: RunArgs) -> Result<Self, Self::Error> {
     // Load Manifest (if it exists)
-    let manifest: Option<BuildManifest> = if args.manifest_path.exists() {
-      let content =
-        fs::read_to_string(&args.manifest_path).map_err(|e| ConfigError::ReadManifest {
-          path: args.manifest_path.clone(),
-          source: e,
-        })?;
+    let manifest: Option<BuildManifest> = if args.manifest.dir.exists()
+      && args.manifest.dir.is_dir()
+    {
+      let manifest_path = args.manifest.path();
+      let content = fs::read_to_string(&manifest_path).map_err(|e| ConfigError::ReadManifest {
+        path: manifest_path,
+        source: e,
+      })?;
       Some(serde_json::from_str(&content).map_err(ConfigError::ParseManifest)?)
     } else {
       None

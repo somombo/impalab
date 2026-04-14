@@ -13,19 +13,28 @@
 // limitations under the License.
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Holds the executable command and base arguments for a component.
-///
-/// This struct is the "contract" for a runnable component, stored
-/// in the `impa_manifest.json` and used by the orchestrator.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandArgs {
-  /// The command to execute (e.g., "python3" or "/path/to/binary").
-  pub command: PathBuf,
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum ComponentType {
+  Generator,
+  Executor,
+}
 
-  /// A list of base arguments to pass to the command (e.g., ["./run.py"]).
-  #[serde(default)]
-  #[serde(skip_serializing_if = "Vec::is_empty")]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ManifestComponent {
+  #[serde(rename = "type")]
+  pub component_type: ComponentType,
+  pub command: PathBuf,
   pub args: Vec<String>,
+  pub dir: PathBuf,
+}
+
+/// Defines the structure of the `impa_manifest.json` file.
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct BuildManifest {
+  /// A map of language names to their runnable `CommandArgs`.
+  pub components: HashMap<String, ManifestComponent>,
 }
