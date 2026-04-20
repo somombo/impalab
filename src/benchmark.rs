@@ -11,9 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::config::Config;
+use crate::config::DataGen;
+use crate::config::RootedManifest;
 use crate::config::Task;
+use crate::config::Tasks;
 use crate::error::BenchmarkError;
+use crate::manifest::CommandArgs;
 use crate::manifest::ManifestComponent;
 use serde::Deserialize;
 use serde::Serialize;
@@ -39,12 +42,19 @@ struct BenchmarkResult {
 /// Takes a fully resolved `Config` and executes the benchmark plan.
 /// It handles spawning the generator (if any) and all algorithm processes,
 /// piping data, and logging results.
-pub async fn run_benchmarks(config: Config) -> Result<(), BenchmarkError> {
-  let gen_info = if let Some(gen_cmd) = &config.generator_command {
+pub async fn run_benchmarks(
+  data_gen: Option<DataGen>,
+  tasks: Tasks,
+  manifest: RootedManifest,
+) -> Result<(), BenchmarkError> {
+  // Resolve Generator (Priority: Override -> Manifest -> Fail)
+  let gen_cmd_args = manifest.resolve_generator(data_gen)?;
+
+  let gen_info = if let Some(gen_cmd) = &gen_cmd_args {
     format!(
       "generator = {}, args = {:?}",
-      gen_cmd.command.display(),
-      gen_cmd.args
+      gen_cmd.run.command.display(),
+      gen_cmd.run.args
     )
   } else {
     "generator = none".to_string()
@@ -57,24 +67,17 @@ pub async fn run_benchmarks(config: Config) -> Result<(), BenchmarkError> {
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for task in &config.tasks {
-      let executor = &task.executor;
+    for task in tasks.into_iter() {
+      let executor = &task.executor_name.clone();
       let lang_span = tracing::info_span!("run_language", executor = %executor);
+
+      // Resolve Executor (Priority: Override -> Manifest -> Fail)
+      let exec_cmd_args = manifest.resolve_executor(&task)?;
+
       let result = async {
         tracing::info!("Running natively for: {}...", executor);
 
-        let Some(algorithm_cmd_args) = config.algorithm_commands.get(executor) else {
-          tracing::error!(executor = %executor, "Internal error: No command found for language. Skipping.");
-          return Err(BenchmarkError::NoCommandForLanguage { language: executor.clone() });
-        };
-
-        match run_pipeline(
-          config.generator_command.as_ref(),
-          algorithm_cmd_args,
-          task,
-        )
-        .await
-        {
+        match run_pipeline(gen_cmd_args.as_ref(), exec_cmd_args, task).await {
           Ok(_) => {
             tracing::info!("Finished running pipeline: {}", executor);
             Ok(())
@@ -102,39 +105,43 @@ pub async fn run_benchmarks(config: Config) -> Result<(), BenchmarkError> {
 async fn run_pipeline(
   generator_cmd_args: Option<&ManifestComponent>,
   ManifestComponent {
-    command: algo_cmd_path,
-    args: algo_args,
-    component_type: _algo_component_type,
-    dir: algo_dir,
-  }: &ManifestComponent,
+    run: CommandArgs {
+      command: exec_cmd_path,
+      args: exec_args,
+    },
+    dir: exec_dir,
+    ..
+  }: ManifestComponent,
   Task {
-    executor,
+    executor_name,
     target,
-    args: kwags,
-  }: &Task,
+    kwargs,
+  }: Task,
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
 
   // --- Configure Algorithm Command ---
-  let task_args: Vec<String> = kwags.iter().map(|(k, v)| format!("--{k}={v}")).collect();
+  let task_args: Vec<String> = kwargs.iter().map(|(k, v)| format!("--{k}={v}")).collect();
 
-  let mut algo_cmd = Command::new(algo_cmd_path);
+  let mut algo_cmd = Command::new(exec_cmd_path);
   algo_cmd
-    .args(algo_args) // Add base args from manifest/override
+    .args(exec_args) // Add base args from manifest/override
     .arg(target)
     .args(task_args)
-    .current_dir(algo_dir)
+    .current_dir(exec_dir)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(true);
 
   // --- Configure Generator (if provided) ---
   if let Some(ManifestComponent {
-    args: gen_args,
-    command: gen_cmd_path,
-    component_type: _gen_component_type,
+    run: CommandArgs {
+      args: gen_args,
+      command: gen_cmd_path,
+    },
     dir: gen_dir,
+    ..
   }) = generator_cmd_args
   {
     // --- Pipelined Mode ---
@@ -193,11 +200,11 @@ async fn run_pipeline(
     .ok_or(BenchmarkError::PipeAlgoStderr)?;
 
   // --- Concurrently process all IO ---
-  let lang_clone = executor.to_string();
+  let lang_clone = executor_name.to_string();
 
   let stdout_task = tokio::spawn(
     async move { process_algorithm_stdout(algo_stdout, &lang_clone).await }
-      .instrument(tracing::info_span!("stdout_handler", executor = %executor)),
+      .instrument(tracing::info_span!("stdout_handler", executor = %executor_name)),
   );
 
   let algo_stderr_task = tokio::spawn(

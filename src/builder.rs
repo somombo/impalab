@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::cli::FilterArgs;
-use crate::cli::ManifestArg;
+use crate::cli::ManifestArgs;
 use crate::error::BuildError;
 use crate::manifest::BuildManifest;
+use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use crate::manifest::ManifestComponent;
 use serde::Deserialize;
-use serde::Serialize;
 use std::collections::hash_map::Entry;
 use std::fs;
 use std::path::Path;
@@ -26,23 +26,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::process::Output;
 
-/// Holds the executable command and base arguments for a component.
-///
-/// This struct is the "contract" for a runnable component, stored
-/// in the `impa_manifest.json` and used by the orchestrator.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CommandArgs {
-  /// The command to execute (e.g., "python3" or "/path/to/binary").
-  command: PathBuf,
-
-  /// A list of base arguments to pass to the command (e.g., ["./run.py"]).
-  #[serde(default)]
-  #[serde(skip_serializing_if = "Vec::is_empty")]
-  args: Vec<String>,
-}
-
 #[derive(Debug, Deserialize)]
-struct ComponentConfig {
+struct ConfigComponent {
   name: String,
   #[serde(rename = "type")]
   component_type: ComponentType,
@@ -51,7 +36,7 @@ struct ComponentConfig {
 }
 #[derive(Debug, Deserialize)]
 struct Impafile {
-  components: Vec<ComponentConfig>,
+  components: Vec<ConfigComponent>,
 }
 
 /// Scans a directory for components and runs their build steps.
@@ -61,10 +46,10 @@ struct Impafile {
 /// at `manifest_out`.
 pub fn build_components(
   components_dir: PathBuf,
-  manifest_arg: ManifestArg,
+  manifest_arg: ManifestArgs,
   filter_args: &FilterArgs,
 ) -> Result<(), BuildError> {
-  let manifest_out: PathBuf = manifest_arg.path();
+  let manifest_out: PathBuf = manifest_arg.get_path();
   tracing::info!("Scanning for components in {}", components_dir.display());
 
   if !components_dir.exists() {
@@ -101,7 +86,7 @@ pub fn build_components(
 }
 
 fn process_component(
-  manifest_arg: &ManifestArg,
+  manifest_arg: &ManifestArgs,
   base_dir: &Path,
   manifest: &mut BuildManifest,
   filter_args: &FilterArgs,
@@ -165,10 +150,10 @@ fn process_component(
       Entry::Vacant(entry) => {
         let manifest_dir: PathBuf =
           manifest_arg
-            .dir
+            .root_dir
             .canonicalize()
             .map_err(|e| BuildError::CanonicalizePath {
-              path: manifest_arg.path(),
+              path: manifest_arg.get_path(),
               source: e,
             })?;
 
@@ -178,8 +163,7 @@ fn process_component(
         // Store in manifest
         entry.insert(ManifestComponent {
           component_type: config.component_type,
-          command: config.run.command,
-          args: config.run.args,
+          run: config.run,
           dir: cmp_relpath,
         });
       }

@@ -14,6 +14,8 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
+use crate::manifest::ComponentType;
+
 /// Top-level error enum for the impalab library.
 #[derive(Error, Debug)]
 pub enum ImpalabError {
@@ -87,6 +89,9 @@ pub enum BuildError {
 /// Errors related to configuration resolution (src/config.rs).
 #[derive(Error, Debug)]
 pub enum ConfigError {
+  #[error("No manifest file available and no manifest override provided")]
+  NoManifestFileOrOverride,
+
   #[error("Failed to read manifest file: {path}")]
   ReadManifest {
     path: PathBuf,
@@ -97,25 +102,14 @@ pub enum ConfigError {
   #[error("Failed to parse manifest JSON")]
   ParseManifest(#[from] serde_json::Error),
 
-  #[error("Failed to parse --algorithms JSON: {0}")]
-  ParseAlgorithmsJson(#[source] serde_json::Error),
+  #[error("Failed to parse --tasks as JSON: {0}")]
+  ParseTasksJson(#[source] serde_json::Error),
 
-  #[error("Failed to parse --algorithm-override-paths JSON: {0}")]
-  ParseAlgoOverrideJson(#[source] serde_json::Error),
+  #[error("Failed to parse --component_overrides JSON: {0}")]
+  ParseCmpOverrideJson(#[source] serde_json::Error),
 
   #[error("Executor component should be of `ComponentType::Executor`")]
   ExecutorIncorrectComponentType,
-
-  #[error("Generating component should be of `ComponentType::Generator`")]
-  GeneratorIncorrectComponentType,
-
-  #[error(
-    "Generator '{generator_name}' not found in manifest. Available: {available:?}. Or, provide --generator-override-path."
-  )]
-  GeneratorNotFound {
-    generator_name: String,
-    available: Vec<String>,
-  },
 
   #[error(
     "Generator '{generator_name}' specified via override but no build manifest was found at {manifest_path}"
@@ -199,5 +193,17 @@ pub enum BenchmarkError {
     target: &'static str,
     #[source]
     source: std::io::Error,
+  },
+
+  #[error("Component '{component_name}' should be of type`{component_type:?}`")]
+  IncorrectComponentType {
+    component_name: String,
+    component_type: ComponentType,
+  },
+
+  #[error("Component '{component_name}' not found in manifest. Available: {available:?}.")]
+  ComponentNotFound {
+    component_name: String,
+    available: Vec<String>,
   },
 }
