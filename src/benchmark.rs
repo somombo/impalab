@@ -18,8 +18,10 @@ use crate::config::Tasks;
 use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ManifestComponent;
-use serde::Deserialize;
+use seahash::SeaHasher;
 use serde::Serialize;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
@@ -29,11 +31,15 @@ use tokio::process::Command;
 use tracing::Instrument;
 
 /// The structure of a single benchmark result, used for JSON serialization.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct BenchmarkResult {
-  id: String,
-  language: String,
-  function_name: String,
+#[derive(Debug, Serialize)]
+struct BenchmarkResult<'a, 'b> {
+  task_index: usize,
+  task_hash: &'a str,
+
+  #[serde(flatten)]
+  task: &'b Task,
+
+  data_id: String,
   duration: u64,
 }
 
@@ -67,17 +73,17 @@ pub async fn run_benchmarks(
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for task in tasks.into_iter() {
-      let executor = &task.executor_name.clone();
+    for enum_task in tasks.into_iter().enumerate() {
+      let executor = enum_task.1.executor_name.clone();
       let lang_span = tracing::info_span!("run_language", executor = %executor);
 
       // Resolve Executor (Priority: Override -> Manifest -> Fail)
-      let exec_cmd_args = manifest.resolve_executor(&task)?;
+      let exec_cmd_args = manifest.resolve_executor(&enum_task.1)?;
 
       let result = async {
         tracing::info!("Running natively for: {}...", executor);
 
-        match run_pipeline(gen_cmd_args.as_ref(), exec_cmd_args, task).await {
+        match run_pipeline(gen_cmd_args.as_ref(), exec_cmd_args, enum_task).await {
           Ok(_) => {
             tracing::info!("Finished running pipeline: {}", executor);
             Ok(())
@@ -112,23 +118,15 @@ async fn run_pipeline(
     dir: exec_dir,
     ..
   }: ManifestComponent,
-  Task {
-    executor_name,
-    target,
-    kwargs,
-  }: Task,
+  (task_index, task): (usize, Task),
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
 
-  // --- Configure Algorithm Command ---
-  let task_args: Vec<String> = kwargs.iter().map(|(k, v)| format!("--{k}={v}")).collect();
-
+  // --- Configure Executor Command ---
   let mut algo_cmd = Command::new(exec_cmd_path);
   algo_cmd
     .args(exec_args) // Add base args from manifest/override
-    .arg(target)
-    .args(task_args)
     .current_dir(exec_dir)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -189,7 +187,6 @@ async fn run_pipeline(
   tracing::debug!(cmd = ?algo_cmd, "Spawning algorithm component");
   let mut algo_child = algo_cmd.spawn().map_err(BenchmarkError::SpawnAlgorithm)?;
 
-  // Take pipes from sorter
   let algo_stdout = algo_child
     .stdout
     .take()
@@ -200,10 +197,10 @@ async fn run_pipeline(
     .ok_or(BenchmarkError::PipeAlgoStderr)?;
 
   // --- Concurrently process all IO ---
-  let lang_clone = executor_name.to_string();
-
+  let executor_name = &task.executor_name;
+  let task_ = task.clone();
   let stdout_task = tokio::spawn(
-    async move { process_algorithm_stdout(algo_stdout, &lang_clone).await }
+    async move { process_algorithm_stdout(algo_stdout, task_index, &task_).await }
       .instrument(tracing::info_span!("stdout_handler", executor = %executor_name)),
   );
 
@@ -248,13 +245,21 @@ async fn run_pipeline(
   Ok(())
 }
 
+impl Task {
+  pub fn get_hash(&self) -> String {
+    let mut hasher = SeaHasher::new();
+    self.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+  }
+}
 /// Reads lines from the algorithm's stdout, parses them, and prints them as JSON.
 async fn process_algorithm_stdout<R: AsyncRead + Unpin>(
   stream: R,
-  language: &str,
+  task_index: usize,
+  task: &Task,
 ) -> Result<(), BenchmarkError> {
   let mut reader = BufReader::new(stream).lines();
-
+  let task_hash = task.get_hash();
   while let Some(line) = reader
     .next_line()
     .await
@@ -264,8 +269,15 @@ async fn process_algorithm_stdout<R: AsyncRead + Unpin>(
       continue;
     }
 
-    match parse_native_line(&line, language) {
-      Ok(result) => {
+    match parse_native_line(&line) {
+      Ok((data_id, duration)) => {
+        let result = BenchmarkResult {
+          task_index,
+          task_hash: &task_hash,
+          task,
+          data_id,
+          duration,
+        };
         let json_result =
           serde_json::to_string(&result).map_err(BenchmarkError::SerializeResult)?;
         println!("{}", json_result);
@@ -300,29 +312,23 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
 }
 
 /// Parses a single line of `id,func,duration` CSV.
-fn parse_native_line(line: &str, language: &str) -> Result<BenchmarkResult, BenchmarkError> {
+fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
   let parts: Vec<&str> = line.split(',').collect();
 
-  if parts.len() != 3 {
+  if parts.len() != 2 {
     return Err(BenchmarkError::CsvParts {
       parts: parts.len(),
       line: line.to_string(),
     });
   }
 
-  let id = parts[0].to_string();
-  let function_name = parts[1].to_string();
-  let duration = parts[2]
+  let data_id = parts[0].to_string();
+  let duration = parts[1]
     .parse::<u64>()
     .map_err(|e| BenchmarkError::ParseDuration {
-      duration: parts[2].to_string(),
+      duration: parts[1].to_string(),
       source: e,
     })?;
 
-  Ok(BenchmarkResult {
-    id,
-    language: language.to_string(),
-    function_name,
-    duration,
-  })
+  Ok((data_id, duration))
 }
