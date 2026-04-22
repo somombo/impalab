@@ -32,10 +32,12 @@ fn test_build_no_components() {
     .arg("build")
     .arg("--components-dir")
     .arg(temp.path())
-    .arg("--manifest-path")
-    .arg(temp.path().join("test_manifest.json"))
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("test_manifest.json")
     .env("RUST_LOG", "info")
-    .env("CLICOLOR", "0");
+    .env("NO_COLOR", "1");
 
   cmd
     .assert()
@@ -51,14 +53,14 @@ fn test_run_no_manifest_or_overrides() {
     .arg("run")
     .arg("--generator")
     .arg("none")
-    .arg("--algorithms")
-    .arg(r#"{"test-lang": ["test-algo"]}"#)
-    .arg("--manifest-path")
+    .arg("--tasks")
+    .arg(r#"[{"executor": "test-lang", "target": "test-algo"}]"#)
+    .arg("--manifest-filename")
     .arg("non_existent_manifest.json")
-    .env("CLICOLOR", "0");
+    .env("NO_COLOR", "1");
 
   cmd.assert().failure().stderr(predicate::str::contains(
-    "No executable path found for language 'test-lang'",
+    "No manifest file available and no manifest override provided",
   ));
 }
 
@@ -74,8 +76,6 @@ fn test_build_and_run_e2e() {
   copy("tests/fixtures", temp.path(), &options).unwrap();
   fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
 
-  let manifest_path = temp.path().join("e2e_manifest.json");
-
   // --- Test `impa build` ---
 
   let mut build_cmd = Command::new(cargo::cargo_bin!("impa"));
@@ -83,10 +83,12 @@ fn test_build_and_run_e2e() {
     .arg("build")
     .arg("--components-dir")
     .arg(&components_dir)
-    .arg("--manifest-path")
-    .arg(&manifest_path)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
     .env("RUST_LOG", "info")
-    .env("CLICOLOR", "0");
+    .env("NO_COLOR", "1");
 
   // Assert build success
   build_cmd
@@ -94,18 +96,21 @@ fn test_build_and_run_e2e() {
     .success()
     .stderr(predicate::str::contains("Build Process Complete"));
 
-  // Verify manifest content
-  let manifest_content = fs::read_to_string(&manifest_path).unwrap();
-  let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
+  {
+    let manifest_path = temp.path().join("e2e_manifest.json");
+    // Verify manifest content
+    let manifest_content = fs::read_to_string(&manifest_path).unwrap();
+    let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
 
-  assert_eq!(
-    manifest_json["generators"]["py-gen-e2e"]["command"],
-    "python3"
-  );
-  assert_eq!(
-    manifest_json["algorithm_executables"]["python-e2e"]["command"],
-    "python3"
-  );
+    assert_eq!(
+      manifest_json["components"]["py-gen-e2e"]["command"],
+      "python3"
+    );
+    assert_eq!(
+      manifest_json["components"]["python-e2e"]["command"],
+      "python3"
+    );
+  }
 
   // --- Test `impa run` ---
   let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
@@ -113,22 +118,25 @@ fn test_build_and_run_e2e() {
     .arg("run")
     .arg("--generator")
     .arg("py-gen-e2e")
-    .arg("--algorithms")
-    .arg(r#"{"python-e2e": ["test_func_1", "test_func_2"]}"#)
-    .arg("--manifest-path")
-    .arg(&manifest_path)
+    .arg("--tasks")
+    .arg(r#"[ {"executor": "python-e2e", "target": "test_func_1"}, {"executor": "python-e2e", "target": "test_func_2", "args": {"foo": "true", "bars": "-100"}} ]"#)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
     .arg("--seed")
     .arg("42")
-    .env("CLICOLOR", "0");
+    // .env("CLICOLOR", "0")
+    .env("NO_COLOR", "1");
 
   // Assert run success and check the JSONL output
   run_cmd
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"id":"test_case_1","language":"python-e2e","function_name":"test_func_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"task_hash":"22e212d55ee1c69b","executor":"python-e2e","target":"test_func_1","args":{},"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"id":"test_case_1","language":"python-e2e","function_name":"test_func_2","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":1,"task_hash":"f11781d8a628a937","executor":"python-e2e","target":"test_func_2","args":{"bars":"-100","foo":"true"},"data_id":"test_case_1","duration":12}"#)
     );
 }

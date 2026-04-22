@@ -58,7 +58,8 @@ pub async fn run_benchmarks(
 
   let gen_info = if let Some(gen_cmd) = &gen_cmd_args {
     format!(
-      "generator = {}, args = {:?}",
+      "dir = {}, generator = {}, args = {:?}",
+      gen_cmd.dir.display(),
       gen_cmd.run.command.display(),
       gen_cmd.run.args
     )
@@ -151,6 +152,7 @@ async fn run_pipeline(
       .stderr(Stdio::piped())
       .kill_on_drop(true);
 
+    tracing::debug!(gen_dir = ?gen_dir, "Generator directory");
     tracing::debug!(cmd = ?gen_cmd, "Spawning generator");
     let mut gen_child = gen_cmd.spawn().map_err(BenchmarkError::SpawnGenerator)?;
 
@@ -280,6 +282,7 @@ async fn process_algorithm_stdout<R: AsyncRead + Unpin>(
         };
         let json_result =
           serde_json::to_string(&result).map_err(BenchmarkError::SerializeResult)?;
+        tracing::debug!(parse_native_line = json_result, "Enriched Output");
         println!("{}", json_result);
       }
       Err(e) => {

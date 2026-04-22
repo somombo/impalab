@@ -1,7 +1,7 @@
-name = "py-algo-e2e"
-type = "algorithm"
-language = "python-e2e" # We use a unique lang to not conflict with other tests
+[[components]]
+type = "executor"
+name = "python-e2e" # We use a unique lang to not conflict with other tests
 
-[run]
+[components.run]
 command = "python3"
 args = ["algo.py"]
