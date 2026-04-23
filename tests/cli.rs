@@ -54,7 +54,7 @@ fn test_run_no_manifest_or_overrides() {
     .arg("--generator")
     .arg("none")
     .arg("--tasks")
-    .arg(r#"[{"executor": "test-lang", "target": "test-algo"}]"#)
+    .arg(r#"[{"executor": "test-executor", "target": "test-target"}]"#)
     .arg("--manifest-filename")
     .arg("non_existent_manifest.json")
     .env("NO_COLOR", "1");

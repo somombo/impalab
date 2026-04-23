@@ -4,4 +4,4 @@ name = "python-e2e" # We use a unique lang to not conflict with other tests
 
 [components.run]
 command = "python3"
-args = ["algo.py"]
+args = ["exec.py"]

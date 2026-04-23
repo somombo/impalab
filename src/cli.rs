@@ -20,9 +20,9 @@ use std::path::PathBuf;
 use crate::config::Tasks;
 use crate::error::ConfigError;
 
-/// Algorithm Benchmarking Orchestrator
+/// Benchmarking Orchestrator
 #[derive(Debug, Parser)]
-#[command(version, about = "Algorithm Benchmarking Orchestrator")]
+#[command(version, about = "Benchmarking Orchestrator")]
 pub struct Cli {
   #[command(subcommand)]
   pub command: Commands,
@@ -65,8 +65,8 @@ impl RunArgs {
 /// Arguments for the `run` subcommand.
 #[derive(Debug, clap::Args)]
 pub struct RunArgs<F: FileReader + Default + std::fmt::Debug = RealFileSystem> {
-  /// JSON string mapping languages to lists of algorithm names to run.
-  /// Example: '{"cpp": ["std::sort"], "lean": ["List.mergeSort"]}'
+  /// JSON array of tasks to run, specifying the executor, target, and optional arguments.
+  /// Example: '[{"executor": "cpp", "target": "std::sort"}, {"executor": "lean", "target": "customSort", "args": {"foo": "bar"}}]'
   #[arg(long, required = true, value_parser = RunArgs::parse_tasks)]
   pub tasks: Tasks,
 
@@ -79,7 +79,7 @@ pub struct RunArgs<F: FileReader + Default + std::fmt::Debug = RealFileSystem> {
 
 #[derive(Debug, clap::Args)]
 pub struct GenArgs {
-  /// Name of the generator component to use, or 'none' for self-contained algorithms.
+  /// Name of the generator component to use, or 'none' for self-contained executors.
   #[arg(id = "generator", long, required = true)]
   pub name: String,
   /// Seed for the random number generator (if a generator is used).

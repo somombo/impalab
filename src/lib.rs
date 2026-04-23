@@ -16,7 +16,7 @@
 //!
 //! `impalab` is a language-agnostic framework for orchestrating micro-benchmarks.
 //! It allows you to define, build, and run benchmark components written in any language,
-//! piping data from a generator to one or more algorithm implementations.
+//! piping data from a generator to one or more executor implementations.
 //!
 //! This crate contains the main library logic for the `impa` CLI, but its
 //! core modules (`builder`, `config`, `benchmark`) could be used independently.
@@ -29,7 +29,7 @@
 //! * [`config`]: Handles parsing the `RunArgs` from the CLI, applying overrides,
 //!   and resolving all component paths from the manifest to create a `Config` struct.
 //! * [`benchmark`]: Contains the `run_benchmarks` function which executes the
-//!   generator and algorithm processes, handling `stdin`/`stdout` piping.
+//!   generator and executor processes, handling `stdin`/`stdout` piping.
 //! * [`cli`]: Defines the `clap`-based command-line interface.
 //! * [`command`]: Defines the shared `CommandArgs` struct.
 //! * [`error`]: Defines the custom error types for the library.

@@ -22,30 +22,27 @@ To contribute code, it helps to understand the core architecture.
 The `impa` binary is the main orchestrator, built in Rust. It has two primary commands:
 
 1.  **`impa build`**: This command crawls the component directories, finds all `impafile.toml` files, runs their optional `[build]` step, and saves the `[run]` commands to the `impa_manifest.json`.
-2.  **`impa run`**: This command reads the `impa_manifest.json` (or CLI overrides), spawns the chosen `generator` process, and pipes its `stdout` to the `stdin` of one or more `algorithm` processes. It captures the `stdout` from the algorithms and prints it as JSONL.
+2.  **`impa run`**: This command reads the `impa_manifest.json` (or CLI overrides), spawns the chosen `generator` process, and pipes its `stdout` to the `stdin` of one or more `executor` processes. It captures the `stdout` from the executors and prints it as JSONL.
 
 ### The `impafile.toml` Contract
 
 The `impafile.toml` is the "contract" that defines a component.
 
 ```toml
+[[components]]
 # A unique name for this component.
 name = "my-python-generator"
 
-# The type: "generator" or "algorithm"
+# The type: "generator" or "executor"
 type = "generator"
 
-# (For 'algorithm' type only) The language key.
-# This MUST match the key used in the `impa run --algorithms` JSON.
-language = "python"
-
 # (Optional) The build step to run with `impa build`.
-[build]
+[components.build]
 command = "python3"
 args = ["-m", "pip", "install", "-r", "requirements.txt"]
 
 # (Required) The command to execute for `impa run`.
-[run]
+[components.run]
 command = "python3"
 args = ["./gen.py"]
 ```
@@ -59,15 +56,16 @@ For the `impa` orchestrator to work, your component must respect its interface:
       * Accept a `--seed=<u64>` argument.
       * Accept any passthrough arguments (e.g., `--size=1000`).
       * Print test cases to `stdout`, one per line.
-      * Each line MUST start with a unique `id` (e.g., `test_1,...`).
+      * Each line MUST start with a unique `data_id` (e.g., `test_1,...`).
 
-  * **Algorithms** MUST:
+  * **Executors** MUST:
 
-      * Accept a `--functions=<list>` argument (e.g., `--functions=func1,func2`).
+      * Accept the `target` name as the first positional argument.
+      * Accept any optional arguments as `--key=value` flags.
       * Read test cases line-by-line from `stdin`.
-      * For each line, parse the `id` from the generator.
-      * For each function in `--functions`, run the benchmark and print the result to `stdout`.
-      * The output format MUST be `id,function_name,duration_nanos\n`.
+      * For each line, parse the `data_id` from the generator.
+      * Run the benchmark for the specified target and print the result to `stdout`.
+      * The output format MUST be `data_id,duration_nanos\n`.
 
 ## Development Setup
 

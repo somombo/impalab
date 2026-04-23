@@ -120,7 +120,7 @@ pub enum ConfigError {
   },
 
   #[error("No executable path found for language '{language}'. Searched overrides and manifest.")]
-  AlgoExecutableNotFound { language: String },
+  ExecExecutableNotFound { language: String },
 }
 
 /// Errors related to the benchmark execution (src/benchmark.rs).
@@ -141,20 +141,20 @@ pub enum BenchmarkError {
   #[error("Failed to convert generator stdout pipe")]
   ConvertGenStdout(#[source] std::io::Error),
 
-  #[error("Failed to spawn algorithm component")]
-  SpawnAlgorithm(#[source] std::io::Error),
+  #[error("Failed to spawn executor component")]
+  SpawnExecutor(#[source] std::io::Error),
 
-  #[error("Failed to take algorithm stdout pipe")]
-  PipeAlgoStdout,
+  #[error("Failed to take executor stdout pipe")]
+  PipeExecStdout,
 
-  #[error("Failed to take algorithm stderr pipe")]
-  PipeAlgoStderr,
+  #[error("Failed to take executor stderr pipe")]
+  PipeExecStderr,
 
   #[error("Failed to wait for child processes")]
   WaitChild(#[source] std::io::Error),
 
-  #[error("Failed to wait for algorithm process")]
-  WaitAlgo(#[source] std::io::Error),
+  #[error("Failed to wait for executor process")]
+  WaitExec(#[source] std::io::Error),
 
   #[error("Generator stderr task failed")]
   GenStderrTask(tokio::task::JoinError),
@@ -162,17 +162,17 @@ pub enum BenchmarkError {
   #[error("Stdout processing task failed")]
   StdoutTask(tokio::task::JoinError),
 
-  #[error("Algorithm stderr task failed")]
-  AlgoStderrTask(tokio::task::JoinError),
+  #[error("Executor stderr task failed")]
+  ExecStderrTask(tokio::task::JoinError),
 
-  #[error("Failed to read algorithm stdout")]
-  ReadAlgoStdout(#[source] std::io::Error),
+  #[error("Failed to read executor stdout")]
+  ReadExecStdout(#[source] std::io::Error),
 
   #[error("Failed to serialize benchmark result")]
   SerializeResult(#[from] serde_json::Error),
 
-  #[error("Malformed output line from algorithm: {line}")]
-  MalformedAlgoOutput {
+  #[error("Malformed output line from executor: {line}")]
+  MalformedExecOutput {
     line: String,
     #[source]
     source: Box<BenchmarkError>, // Wraps parsing errors

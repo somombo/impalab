@@ -46,7 +46,7 @@ struct BenchmarkResult<'a, 'b> {
 /// Main benchmark runner.
 ///
 /// Takes a fully resolved `Config` and executes the benchmark plan.
-/// It handles spawning the generator (if any) and all algorithm processes,
+/// It handles spawning the generator (if any) and all executor processes (tasks),
 /// piping data, and logging results.
 pub async fn run_benchmarks(
   data_gen: Option<DataGen>,
@@ -107,7 +107,7 @@ pub async fn run_benchmarks(
   .await
 }
 
-/// Spawns and manages the generator -> algorithm pipeline for one language.
+/// Spawns and manages the generator -> executor pipeline for one language.
 /// Handles both pipelined and self-contained (no generator) runs.
 async fn run_pipeline(
   generator_cmd_args: Option<&ManifestComponent>,
@@ -125,8 +125,8 @@ async fn run_pipeline(
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
 
   // --- Configure Executor Command ---
-  let mut algo_cmd = Command::new(exec_cmd_path);
-  algo_cmd
+  let mut exec_cmd = Command::new(exec_cmd_path);
+  exec_cmd
     .args(exec_args) // Add base args from manifest/override
     .current_dir(exec_dir)
     .stdout(Stdio::piped())
@@ -166,11 +166,11 @@ async fn run_pipeline(
       .take()
       .ok_or(BenchmarkError::PipeGenStderr)?;
 
-    // Pipe generator's stdout into algorithm's stdin
+    // Pipe generator's stdout into executor's stdin
     let gen_stdout_try: Stdio = gen_stdout
       .try_into()
       .map_err(BenchmarkError::ConvertGenStdout)?;
-    algo_cmd.stdin(gen_stdout_try);
+    exec_cmd.stdin(gen_stdout_try);
 
     // Spawn task to log generator's stderr
     gen_stderr_handle = Some(tokio::spawn(
@@ -181,47 +181,47 @@ async fn run_pipeline(
     gen_child_handle = Some(gen_child);
   } else {
     // --- Self-Contained Mode ---
-    tracing::debug!("Running algorithm in self-contained mode (no generator)");
-    algo_cmd.stdin(Stdio::null());
+    tracing::debug!("Running executor in self-contained mode (no generator)");
+    exec_cmd.stdin(Stdio::null());
   }
 
-  // --- Spawn Algorithm Process ---
-  tracing::debug!(cmd = ?algo_cmd, "Spawning algorithm component");
-  let mut algo_child = algo_cmd.spawn().map_err(BenchmarkError::SpawnAlgorithm)?;
+  // --- Spawn Executor Process ---
+  tracing::debug!(cmd = ?exec_cmd, "Spawning executor component");
+  let mut exec_child = exec_cmd.spawn().map_err(BenchmarkError::SpawnExecutor)?;
 
-  let algo_stdout = algo_child
+  let exec_stdout = exec_child
     .stdout
     .take()
-    .ok_or(BenchmarkError::PipeAlgoStdout)?;
-  let algo_stderr = algo_child
+    .ok_or(BenchmarkError::PipeExecStdout)?;
+  let exec_stderr = exec_child
     .stderr
     .take()
-    .ok_or(BenchmarkError::PipeAlgoStderr)?;
+    .ok_or(BenchmarkError::PipeExecStderr)?;
 
   // --- Concurrently process all IO ---
   let executor_name = &task.executor_name;
   let task_ = task.clone();
   let stdout_task = tokio::spawn(
-    async move { process_algorithm_stdout(algo_stdout, task_index, &task_).await }
+    async move { process_executor_stdout(exec_stdout, task_index, &task_).await }
       .instrument(tracing::info_span!("stdout_handler", executor = %executor_name)),
   );
 
-  let algo_stderr_task = tokio::spawn(
-    read_and_log_stderr(algo_stderr, "algorithm")
-      .instrument(tracing::info_span!("stderr_handler", target = "algorithm")),
+  let exec_stderr_task = tokio::spawn(
+    read_and_log_stderr(exec_stderr, "executor")
+      .instrument(tracing::info_span!("stderr_handler", target = "executor")),
   );
 
   // --- Wait for processes to exit ---
-  let (gen_status, algo_status) = if let Some(mut gen_child) = gen_child_handle {
+  let (gen_status, exec_status) = if let Some(mut gen_child) = gen_child_handle {
     // Pipelined mode: Wait on both
 
-    let (gen_res, algo_res) =
-      tokio::try_join!(gen_child.wait(), algo_child.wait()).map_err(BenchmarkError::WaitChild)?;
-    (Some(gen_res), algo_res)
+    let (gen_res, exec_res) =
+      tokio::try_join!(gen_child.wait(), exec_child.wait()).map_err(BenchmarkError::WaitChild)?;
+    (Some(gen_res), exec_res)
   } else {
-    // Self-contained mode: Wait only on algorithm
-    let algo_res = algo_child.wait().await.map_err(BenchmarkError::WaitAlgo)?;
-    (None, algo_res)
+    // Self-contained mode: Wait only on executor
+    let exec_res = exec_child.wait().await.map_err(BenchmarkError::WaitExec)?;
+    (None, exec_res)
   };
 
   // --- Wait for IO tasks to finish ---
@@ -230,9 +230,9 @@ async fn run_pipeline(
   }
 
   stdout_task.await.map_err(BenchmarkError::StdoutTask)??;
-  algo_stderr_task
+  exec_stderr_task
     .await
-    .map_err(BenchmarkError::AlgoStderrTask)??;
+    .map_err(BenchmarkError::ExecStderrTask)??;
 
   // --- Check exit statuses ---
   if let Some(gen_status) = gen_status
@@ -240,8 +240,8 @@ async fn run_pipeline(
   {
     tracing::error!(code = ?gen_status.code(), "Generator process failed");
   }
-  if !algo_status.success() {
-    tracing::error!(code = ?algo_status.code(), "Algorithm process failed");
+  if !exec_status.success() {
+    tracing::error!(code = ?exec_status.code(), "Executor process failed");
   }
 
   Ok(())
@@ -254,8 +254,8 @@ impl Task {
     format!("{:016x}", hasher.finish())
   }
 }
-/// Reads lines from the algorithm's stdout, parses them, and prints them as JSON.
-async fn process_algorithm_stdout<R: AsyncRead + Unpin>(
+/// Reads lines from the executor's stdout, parses them, and prints them as JSON.
+async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
   task_index: usize,
   task: &Task,
@@ -265,7 +265,7 @@ async fn process_algorithm_stdout<R: AsyncRead + Unpin>(
   while let Some(line) = reader
     .next_line()
     .await
-    .map_err(BenchmarkError::ReadAlgoStdout)?
+    .map_err(BenchmarkError::ReadExecStdout)?
   {
     if line.is_empty() {
       continue;
@@ -286,11 +286,11 @@ async fn process_algorithm_stdout<R: AsyncRead + Unpin>(
         println!("{}", json_result);
       }
       Err(e) => {
-        let wrapped_err = BenchmarkError::MalformedAlgoOutput {
+        let wrapped_err = BenchmarkError::MalformedExecOutput {
           line: line.clone(),
           source: Box::new(e),
         };
-        tracing::warn!(?line, error = %wrapped_err, "Warning: Malformed output line from algorithm");
+        tracing::warn!(?line, error = %wrapped_err, "Warning: Malformed output line from executor");
       }
     }
   }
@@ -314,7 +314,7 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   Ok(())
 }
 
-/// Parses a single line of `id,func,duration` CSV.
+/// Parses a single line of `data_id,duration` CSV.
 fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
   let parts: Vec<&str> = line.split(',').collect();
 
