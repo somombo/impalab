@@ -1,6 +1,6 @@
 [package]
 name = "impalab"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Chisomo Makombo Sakala"]
 edition = "2024"
 description = "A language-agnostic framework for orchestrating micro-benchmarks."
