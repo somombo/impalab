@@ -206,4 +206,10 @@ pub enum BenchmarkError {
     component_name: String,
     available: Vec<String>,
   },
+
+  #[error("Generator process failed with exit code: {code:?}")]
+  GeneratorProcessFailed { code: Option<i32> },
+
+  #[error("Executor process failed with exit code: {code:?}")]
+  ExecutorProcessFailed { code: Option<i32> },
 }

@@ -91,7 +91,11 @@ impl RootedManifest {
     }
 
     let mut cmp = cmp.clone();
-    cmp.dir = self.root_dir.join(&cmp.dir);
+
+    if let Some(ref mut wd) = cmp.run.working_dir {
+      *wd = self.root_dir.join(&wd);
+    }
+
     Ok(cmp)
   }
 
@@ -246,8 +250,8 @@ mod tests {
       "default-gen".to_string(),
       ManifestComponent {
         component_type: Generator,
-        dir: PathBuf::new(),
         run: CommandArgs {
+          working_dir: None,
           command: PathBuf::from("/bin/manifest-gen"),
           args: vec!["--from-manifest".to_string()],
         },
@@ -258,8 +262,8 @@ mod tests {
       "cpp".to_string(),
       ManifestComponent {
         component_type: Executor,
-        dir: PathBuf::new(),
         run: CommandArgs {
+          working_dir: None,
           command: PathBuf::from("/bin/manifest-cpp"),
           args: vec![],
         },
@@ -269,8 +273,8 @@ mod tests {
       "rust".to_string(),
       ManifestComponent {
         component_type: Executor,
-        dir: PathBuf::new(),
         run: CommandArgs {
+          working_dir: None,
           command: PathBuf::from("/bin/manifest-rust"),
           args: vec![],
         },

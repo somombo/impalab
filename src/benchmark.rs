@@ -58,8 +58,8 @@ pub async fn run_benchmarks(
 
   let gen_info = if let Some(gen_cmd) = &gen_cmd_args {
     format!(
-      "dir = {}, generator = {}, args = {:?}",
-      gen_cmd.dir.display(),
+      "dir = {:?}, generator = {}, args = {:?}",
+      gen_cmd.run.working_dir,
       gen_cmd.run.command.display(),
       gen_cmd.run.args
     )
@@ -112,11 +112,12 @@ pub async fn run_benchmarks(
 async fn run_pipeline(
   generator_cmd_args: Option<&ManifestComponent>,
   ManifestComponent {
-    run: CommandArgs {
-      command: exec_cmd_path,
-      args: exec_args,
-    },
-    dir: exec_dir,
+    run:
+      CommandArgs {
+        command: exec_cmd_path,
+        args: exec_args,
+        working_dir: exec_dir,
+      },
     ..
   }: ManifestComponent,
   (task_index, task): (usize, Task),
@@ -128,18 +129,22 @@ async fn run_pipeline(
   let mut exec_cmd = Command::new(exec_cmd_path);
   exec_cmd
     .args(exec_args) // Add base args from manifest/override
-    .current_dir(exec_dir)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(true);
 
+  if let Some(dir) = exec_dir {
+    exec_cmd.current_dir(dir);
+  }
+
   // --- Configure Generator (if provided) ---
   if let Some(ManifestComponent {
-    run: CommandArgs {
-      args: gen_args,
-      command: gen_cmd_path,
-    },
-    dir: gen_dir,
+    run:
+      CommandArgs {
+        args: gen_args,
+        command: gen_cmd_path,
+        working_dir: gen_dir,
+      },
     ..
   }) = generator_cmd_args
   {
@@ -147,10 +152,13 @@ async fn run_pipeline(
     let mut gen_cmd = Command::new(gen_cmd_path);
     gen_cmd
       .args(gen_args)
-      .current_dir(gen_dir)
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())
       .kill_on_drop(true);
+
+    if let Some(dir) = gen_dir {
+      gen_cmd.current_dir(dir);
+    }
 
     tracing::debug!(gen_dir = ?gen_dir, "Generator directory");
     tracing::debug!(cmd = ?gen_cmd, "Spawning generator");
@@ -239,9 +247,15 @@ async fn run_pipeline(
     && !gen_status.success()
   {
     tracing::error!(code = ?gen_status.code(), "Generator process failed");
+    return Err(BenchmarkError::GeneratorProcessFailed {
+      code: gen_status.code(),
+    });
   }
   if !exec_status.success() {
     tracing::error!(code = ?exec_status.code(), "Executor process failed");
+    return Err(BenchmarkError::ExecutorProcessFailed {
+      code: exec_status.code(),
+    });
   }
 
   Ok(())
@@ -290,7 +304,8 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
           line: line.clone(),
           source: Box::new(e),
         };
-        tracing::warn!(?line, error = %wrapped_err, "Warning: Malformed output line from executor");
+        tracing::error!(?line, error = %wrapped_err, "Error: Malformed output line from executor");
+        return Err(wrapped_err);
       }
     }
   }

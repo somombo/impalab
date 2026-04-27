@@ -26,19 +26,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::process::Output;
 
-#[derive(Debug, Deserialize)]
-struct ConfigComponent {
-  name: String,
-  #[serde(rename = "type")]
-  component_type: ComponentType,
-  build: Option<CommandArgs>,
-  run: CommandArgs,
-}
-#[derive(Debug, Deserialize)]
-struct Impafile {
-  components: Vec<ConfigComponent>,
-}
-
 /// Scans a directory for components and runs their build steps.
 ///
 /// This function finds all `impafile.toml` files in the `components_dir`,
@@ -93,6 +80,19 @@ fn process_component(
 ) -> Result<(), BuildError> {
   let content =
     fs::read_to_string(base_dir.join("impafile.toml")).map_err(BuildError::ReadConfig)?;
+
+  #[derive(Debug, Deserialize)]
+  struct ConfigComponent {
+    name: String,
+    #[serde(rename = "type")]
+    component_type: ComponentType,
+    build: Option<CommandArgs>,
+    run: CommandArgs,
+  }
+  #[derive(Debug, Deserialize)]
+  struct Impafile {
+    components: Vec<ConfigComponent>,
+  }
   let impafile: Impafile = toml::from_str(&content).map_err(BuildError::TomlParse)?;
 
   for config in impafile.components {
@@ -163,8 +163,10 @@ fn process_component(
         // Store in manifest
         entry.insert(ManifestComponent {
           component_type: config.component_type,
-          run: config.run,
-          dir: cmp_relpath,
+          run: CommandArgs {
+            working_dir: Some(cmp_relpath),
+            ..config.run
+          },
         });
       }
     }

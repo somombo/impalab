@@ -30,22 +30,6 @@ pub struct ManifestComponent {
 
   #[serde(flatten)]
   pub run: CommandArgs,
-
-  #[serde(default = "PathBuf::new")]
-  #[serde(skip_serializing_if = "path_is_empty")]
-  pub dir: PathBuf,
-}
-fn path_is_empty(p: &std::path::Path) -> bool {
-  p.as_os_str().is_empty()
-}
-
-pub type ComponentCommandMap = HashMap<String, ManifestComponent>;
-
-/// Defines the structure of the `impa_manifest.json` file.
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct BuildManifest {
-  /// A map of language names to their runnable `CommandArgs`.
-  pub components: ComponentCommandMap,
 }
 
 /// Holds the executable command and base arguments for a component.
@@ -61,4 +45,17 @@ pub struct CommandArgs {
   #[serde(default)]
   #[serde(skip_serializing_if = "Vec::is_empty")]
   pub args: Vec<String>,
+
+  #[serde(default)]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub working_dir: Option<PathBuf>,
+}
+
+pub type ComponentCommandMap = HashMap<String, ManifestComponent>;
+
+/// Defines the structure of the `impa_manifest.json` file.
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct BuildManifest {
+  /// A map of language names to their runnable `ManifestComponent`.
+  pub components: ComponentCommandMap,
 }
