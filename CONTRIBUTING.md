@@ -60,8 +60,7 @@ For the `impa` orchestrator to work, your component must respect its interface:
 
   * **Executors** MUST:
 
-      * Accept the `target` name as the first positional argument.
-      * Accept any optional arguments as `--key=value` flags.
+      * Accept any task-specific arguments passed via the `args` array in the JSON configuration.
       * Read test cases line-by-line from `stdin`.
       * For each line, parse the `data_id` from the generator.
       * Run the benchmark for the specified target and print the result to `stdout`.

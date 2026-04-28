@@ -18,10 +18,7 @@ use crate::config::Tasks;
 use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ManifestComponent;
-use seahash::SeaHasher;
 use serde::Serialize;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
@@ -32,12 +29,11 @@ use tracing::Instrument;
 
 /// The structure of a single benchmark result, used for JSON serialization.
 #[derive(Debug, Serialize)]
-struct BenchmarkResult<'a, 'b> {
+struct BenchmarkResult<'a> {
   task_index: usize,
-  task_hash: &'a str,
 
   #[serde(flatten)]
-  task: &'b Task,
+  task: &'a Task,
 
   data_id: String,
   duration: u64,
@@ -261,13 +257,6 @@ async fn run_pipeline(
   Ok(())
 }
 
-impl Task {
-  pub fn get_hash(&self) -> String {
-    let mut hasher = SeaHasher::new();
-    self.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-  }
-}
 /// Reads lines from the executor's stdout, parses them, and prints them as JSON.
 async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
@@ -275,7 +264,6 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
   task: &Task,
 ) -> Result<(), BenchmarkError> {
   let mut reader = BufReader::new(stream).lines();
-  let task_hash = task.get_hash();
   while let Some(line) = reader
     .next_line()
     .await
@@ -289,7 +277,6 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
       Ok((data_id, duration)) => {
         let result = BenchmarkResult {
           task_index,
-          task_hash: &task_hash,
           task,
           data_id,
           duration,

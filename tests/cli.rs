@@ -54,7 +54,7 @@ fn test_run_no_manifest_or_overrides() {
     .arg("--generator")
     .arg("none")
     .arg("--tasks")
-    .arg(r#"[{"executor": "test-executor", "target": "test-target"}]"#)
+    .arg(r#"[{"executor": "test-executor", "args": ["test-target"]}]"#)
     .arg("--manifest-filename")
     .arg("non_existent_manifest.json")
     .env("NO_COLOR", "1");
@@ -119,7 +119,7 @@ fn test_build_and_run_e2e() {
     .arg("--generator")
     .arg("py-gen-e2e")
     .arg("--tasks")
-    .arg(r#"[ {"executor": "python-e2e", "target": "test_func_1"}, {"executor": "python-e2e", "target": "test_func_2", "args": {"foo": "true", "bars": "-100"}} ]"#)
+    .arg(r#"[ {"executor": "python-e2e", "args": ["test_func_1"]}, {"executor": "python-e2e", "args": ["test_func_2", "--foo=true", "--bars=-100"]} ]"#)
     .arg("--root-dir")
     .arg(temp.path())
     .arg("--manifest-filename")
@@ -134,9 +134,9 @@ fn test_build_and_run_e2e() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"task_hash":"22e212d55ee1c69b","executor":"python-e2e","target":"test_func_1","args":{},"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"task_hash":"f11781d8a628a937","executor":"python-e2e","target":"test_func_2","args":{"bars":"-100","foo":"true"},"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"data_id":"test_case_1","duration":12}"#)
     );
 }

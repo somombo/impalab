@@ -22,7 +22,7 @@ use crate::manifest::ComponentType;
 use crate::manifest::ManifestComponent;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::BTreeMap;
+
 use std::path::PathBuf;
 
 pub struct RootedManifest {
@@ -102,12 +102,7 @@ impl RootedManifest {
   /// Implements the logic for resolving all required executor paths.
   pub fn resolve_executor(&self, task: &Task) -> Result<ManifestComponent, BenchmarkError> {
     let mut cmd = self.resolve_component(&task.executor_name, ComponentType::Executor)?;
-    cmd.run.args.reserve(1 + task.kwargs.len());
-    cmd.run.args.push(task.target.to_owned());
-    cmd
-      .run
-      .args
-      .extend(task.kwargs.iter().map(|(k, v)| format!("--{k}={v}")));
+    cmd.run.args.extend(task.args.clone());
 
     Ok(cmd)
   }
@@ -117,10 +112,9 @@ impl RootedManifest {
 pub struct Task {
   #[serde(rename = "executor")]
   pub executor_name: String,
-  pub target: String,
 
-  #[serde(default, rename = "args")]
-  pub kwargs: BTreeMap<String, String>,
+  #[serde(default)]
+  pub args: Vec<String>,
 }
 
 /// Type alias for the list of executor tasks to run
@@ -408,7 +402,7 @@ mod tests {
       Some(r#"{"cpp": { "type": "executor", "command": "/bin/override-cpp" } }"#.to_string());
 
     let tasks: Tasks = serde_json::from_str(
-      r#"[ { "executor": "cpp", "target": "func1" }, { "executor": "rust", "target": "func2" } ]"#,
+      r#"[ { "executor": "cpp", "args": ["func1"] }, { "executor": "rust", "args": ["func2"] } ]"#,
     )
     .unwrap();
     let manifest = RootedManifest::try_from(args.manifest).unwrap();
@@ -430,7 +424,7 @@ mod tests {
   fn test_algo_priority_2_manifest() {
     let args = mock_run_args(); // No overrides
     let tasks: Tasks =
-      serde_json::from_str(r#"[ { "executor": "cpp", "target": "func1" } ]"#).unwrap();
+      serde_json::from_str(r#"[ { "executor": "cpp", "args": ["func1"] } ]"#).unwrap();
 
     let manifest = RootedManifest::try_from(args.manifest).unwrap();
 
@@ -445,7 +439,7 @@ mod tests {
     let args = mock_run_args(); // No overrides
     // Request "python", which is not in the manifest
     let tasks: Tasks =
-      serde_json::from_str(r#"[ { "executor": "python", "target": "func1" } ]"#).unwrap();
+      serde_json::from_str(r#"[ { "executor": "python", "args": ["func1"] } ]"#).unwrap();
     let manifest = RootedManifest::try_from(args.manifest).unwrap();
 
     let err = manifest.resolve_executor(&tasks[0]).unwrap_err();

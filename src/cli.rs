@@ -65,8 +65,8 @@ impl RunArgs {
 /// Arguments for the `run` subcommand.
 #[derive(Debug, clap::Args)]
 pub struct RunArgs<F: FileReader + Default + std::fmt::Debug = RealFileSystem> {
-  /// JSON array of tasks to run, specifying the executor, target, and optional arguments.
-  /// Example: '[{"executor": "cpp", "target": "std::sort"}, {"executor": "lean", "target": "customSort", "args": {"foo": "bar"}}]'
+  /// JSON array of tasks to run, specifying the executor and arguments.
+  /// Example: '[{"executor": "cpp", "args": ["std::sort"]}, {"executor": "lean", "args": ["customSort", "--foo=bar"]}]'
   #[arg(long, required = true, value_parser = RunArgs::parse_tasks)]
   pub tasks: Tasks,
 
