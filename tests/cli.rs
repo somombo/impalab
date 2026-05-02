@@ -140,3 +140,60 @@ fn test_build_and_run_e2e() {
       predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"data_id":"test_case_1","duration":12}"#)
     );
 }
+
+#[test]
+fn test_build_with_filters() {
+  let temp = tempdir().unwrap();
+  let components_dir = temp.path().join("components");
+  fs::create_dir_all(&components_dir).unwrap();
+
+  let options = CopyOptions::new();
+  copy("tests/fixtures", temp.path(), &options).unwrap();
+  fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
+
+  // Test --include
+  let mut include_cmd = Command::new(cargo::cargo_bin!("impa"));
+  include_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("include_manifest.json")
+    .arg("--include")
+    .arg("py-gen-e2e")
+    .env("NO_COLOR", "1");
+
+  include_cmd.assert().success();
+
+  let manifest_path = temp.path().join("include_manifest.json");
+  let manifest_content = fs::read_to_string(&manifest_path).unwrap();
+  let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
+
+  assert!(manifest_json["components"].get("py-gen-e2e").is_some());
+  assert!(manifest_json["components"].get("python-e2e").is_none());
+
+  // Test --exclude
+  let mut exclude_cmd = Command::new(cargo::cargo_bin!("impa"));
+  exclude_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("exclude_manifest.json")
+    .arg("--exclude")
+    .arg("py-gen-e2e")
+    .env("NO_COLOR", "1");
+
+  exclude_cmd.assert().success();
+
+  let manifest_path = temp.path().join("exclude_manifest.json");
+  let manifest_content = fs::read_to_string(&manifest_path).unwrap();
+  let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
+
+  assert!(manifest_json["components"].get("py-gen-e2e").is_none());
+  assert!(manifest_json["components"].get("python-e2e").is_some());
+}
