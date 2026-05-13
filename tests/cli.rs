@@ -11,10 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use assert_cmd::Command;
 use assert_cmd::cargo;
-use assert_cmd::prelude::*;
 use predicates::prelude::*;
-use std::process::Command;
 use tempfile::tempdir;
 
 use fs_extra::dir::CopyOptions;
@@ -47,20 +46,32 @@ fn test_build_no_components() {
 
 #[test]
 fn test_run_no_manifest_or_overrides() {
+  let temp = tempdir().unwrap();
+  let config_path = temp.path().join("config.json");
+  fs::write(
+    &config_path,
+    r#"{
+    "tasks": [
+      {"executor": "test-executor", "args": ["test-arg"]}
+    ]
+  }"#,
+  )
+  .unwrap();
+
   let mut cmd = Command::new(cargo::cargo_bin!("impa"));
 
   cmd
     .arg("run")
-    .arg("--generator")
-    .arg("none")
-    .arg("--tasks")
-    .arg(r#"[{"executor": "test-executor", "args": ["test-target"]}]"#)
+    .arg("--set")
+    .arg("generator.name=none")
+    .arg("--config")
+    .arg(&config_path)
     .arg("--manifest-filename")
     .arg("non_existent_manifest.json")
     .env("NO_COLOR", "1");
 
   cmd.assert().failure().stderr(predicate::str::contains(
-    "No manifest file available and no manifest override provided",
+    "Component resolution graph validation failed:",
   ));
 }
 
@@ -113,21 +124,118 @@ fn test_build_and_run_e2e() {
   }
 
   // --- Test `impa run` ---
+  let config_path = temp.path().join("config.json");
+  fs::write(
+    &config_path,
+    r#"{
+    "tasks": [
+      {"executor": "python-e2e", "args": ["test_func_1"]},
+      {"executor": "python-e2e", "args": ["test_func_2", "--foo=true", "--bars=-100"]}
+    ]
+  }"#,
+  )
+  .unwrap();
+
   let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
   run_cmd
     .arg("run")
-    .arg("--generator")
-    .arg("py-gen-e2e")
-    .arg("--tasks")
-    .arg(r#"[ {"executor": "python-e2e", "args": ["test_func_1"]}, {"executor": "python-e2e", "args": ["test_func_2", "--foo=true", "--bars=-100"]} ]"#)
+    .arg("--set")
+    .arg("generator.name=py-gen-e2e")
+    .arg("--set")
+    .arg("generator.seed=42")
     .arg("--root-dir")
     .arg(temp.path())
     .arg("--manifest-filename")
     .arg("e2e_manifest.json")
-    .arg("--seed")
-    .arg("42")
+    .arg("--config")
+    .arg(&config_path)
     // .env("CLICOLOR", "0")
     .env("NO_COLOR", "1");
+
+  // Assert run success and check the JSONL output
+  run_cmd
+    .assert()
+    .success()
+    .stdout(
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"data_id":"test_case_1","duration":1234}"#)
+    )
+    .stdout(
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"data_id":"test_case_1","duration":12}"#)
+    );
+}
+
+#[test]
+fn test_build_and_run_e2e_stdin_config() {
+  // Setup: Create temp dir and copy fixtures
+  let temp = tempdir().unwrap();
+  let components_dir = temp.path().join("components");
+  fs::create_dir_all(&components_dir).unwrap();
+
+  // Copy our ./tests/fixtures dir into the temp components_dir
+  let options = CopyOptions::new();
+  copy("tests/fixtures", temp.path(), &options).unwrap();
+  fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
+
+  // --- Test `impa build` ---
+
+  let mut build_cmd = Command::new(cargo::cargo_bin!("impa"));
+  build_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
+    .env("RUST_LOG", "info")
+    .env("NO_COLOR", "1");
+
+  // Assert build success
+  build_cmd
+    .assert()
+    .success()
+    .stderr(predicate::str::contains("Build Process Complete"));
+
+  {
+    let manifest_path = temp.path().join("e2e_manifest.json");
+    // Verify manifest content
+    let manifest_content = fs::read_to_string(&manifest_path).unwrap();
+    let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
+
+    assert_eq!(
+      manifest_json["components"]["py-gen-e2e"]["command"],
+      "python3"
+    );
+    assert_eq!(
+      manifest_json["components"]["python-e2e"]["command"],
+      "python3"
+    );
+  }
+
+  // --- Test `impa run` ---
+  let config_str = r#"{
+    "tasks": [
+      {"executor": "python-e2e", "args": ["test_func_1"]},
+      {"executor": "python-e2e", "args": ["test_func_2", "--foo=true", "--bars=-100"]}
+    ]
+  }"#;
+
+  let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
+  run_cmd
+    .arg("run")
+    .arg("--set")
+    .arg("generator.name=py-gen-e2e")
+    .arg("--set")
+    .arg("generator.seed=42")
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
+    .arg("--config")
+    .arg("-")
+    // .env("CLICOLOR", "0")
+    .env("NO_COLOR", "1")
+    .write_stdin(config_str);
 
   // Assert run success and check the JSONL output
   run_cmd

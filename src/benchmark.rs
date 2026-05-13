@@ -11,12 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::config::DataGen;
-use crate::config::RootedManifest;
+use crate::config::ResolvedConfig;
+use crate::config::ResolvedTask;
 use crate::config::Task;
-use crate::config::Tasks;
 use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
+use crate::manifest::ComponentType;
 use crate::manifest::ManifestComponent;
 use serde::Serialize;
 use std::process::Stdio;
@@ -45,13 +45,11 @@ struct BenchmarkResult<'a> {
 /// It handles spawning the generator (if any) and all executor processes (tasks),
 /// piping data, and logging results.
 pub async fn run_benchmarks(
-  data_gen: Option<DataGen>,
-  tasks: Tasks,
-  manifest: RootedManifest,
+  ResolvedConfig {
+    generator: gen_cmd_args,
+    tasks,
+  }: ResolvedConfig,
 ) -> Result<(), BenchmarkError> {
-  // Resolve Generator (Priority: Override -> Manifest -> Fail)
-  let gen_cmd_args = manifest.resolve_generator(data_gen)?;
-
   let gen_info = if let Some(gen_cmd) = &gen_cmd_args {
     format!(
       "dir = {:?}, generator = {}, args = {:?}",
@@ -70,17 +68,21 @@ pub async fn run_benchmarks(
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for enum_task in tasks.into_iter().enumerate() {
-      let executor = enum_task.1.executor_name.clone();
+    for (
+      task_index,
+      ResolvedTask {
+        raw_task: task,
+        component: exec_cmd_args,
+      },
+    ) in tasks.into_iter().enumerate()
+    {
+      let executor = task.executor_name.clone();
       let lang_span = tracing::info_span!("run_language", executor = %executor);
-
-      // Resolve Executor (Priority: Override -> Manifest -> Fail)
-      let exec_cmd_args = manifest.resolve_executor(&enum_task.1)?;
 
       let result = async {
         tracing::info!("Running natively for: {}...", executor);
 
-        match run_pipeline(gen_cmd_args.as_ref(), exec_cmd_args, enum_task).await {
+        match run_pipeline(gen_cmd_args.as_ref(), exec_cmd_args, (task_index, task)).await {
           Ok(_) => {
             tracing::info!("Finished running pipeline: {}", executor);
             Ok(())
@@ -178,8 +180,9 @@ async fn run_pipeline(
 
     // Spawn task to log generator's stderr
     gen_stderr_handle = Some(tokio::spawn(
-      read_and_log_stderr(gen_stderr, "generator")
-        .instrument(tracing::info_span!("stderr_handler", target = "generator")),
+      read_and_log_stderr(gen_stderr, ComponentType::Generator).instrument(
+        tracing::info_span!("stderr_handler", component_type = ?ComponentType::Generator),
+      ),
     ));
 
     gen_child_handle = Some(gen_child);
@@ -211,8 +214,8 @@ async fn run_pipeline(
   );
 
   let exec_stderr_task = tokio::spawn(
-    read_and_log_stderr(exec_stderr, "executor")
-      .instrument(tracing::info_span!("stderr_handler", target = "executor")),
+    read_and_log_stderr(exec_stderr, ComponentType::Executor)
+      .instrument(tracing::info_span!("stderr_handler", component_type = ?ComponentType::Executor)),
   );
 
   // --- Wait for processes to exit ---
@@ -302,16 +305,19 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
 /// Reads lines from a process's stderr and logs them.
 async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   stream: R,
-  target: &'static str,
+  component_type: ComponentType,
 ) -> Result<(), BenchmarkError> {
   let mut reader = BufReader::new(stream).lines();
 
   while let Some(line) = reader
     .next_line()
     .await
-    .map_err(|e| BenchmarkError::ReadStderr { target, source: e })?
+    .map_err(|e| BenchmarkError::ReadStderr {
+      component_type: component_type.clone(),
+      source: e,
+    })?
   {
-    tracing::warn!(target, "{}", line);
+    tracing::warn!(component_type = ?component_type, "{}", line);
   }
   Ok(())
 }
@@ -336,4 +342,40 @@ fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
     })?;
 
   Ok((data_id, duration))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_parse_native_line_valid() {
+    let (id, dur) = parse_native_line("run_123,45000").unwrap();
+    assert_eq!(id, "run_123");
+    assert_eq!(dur, 45000);
+  }
+
+  #[test]
+  fn test_parse_native_line_malformed_parts_too_few() {
+    let res = parse_native_line("run_123");
+    assert!(matches!(
+      res,
+      Err(BenchmarkError::CsvParts { parts: 1, .. })
+    ));
+  }
+
+  #[test]
+  fn test_parse_native_line_malformed_parts_too_many() {
+    let res = parse_native_line("run_123,45000,extra");
+    assert!(matches!(
+      res,
+      Err(BenchmarkError::CsvParts { parts: 3, .. })
+    ));
+  }
+
+  #[test]
+  fn test_parse_native_line_malformed_invalid_duration() {
+    let res = parse_native_line("run_123,fast");
+    assert!(matches!(res, Err(BenchmarkError::ParseDuration { .. })));
+  }
 }

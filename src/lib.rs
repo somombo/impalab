@@ -31,7 +31,10 @@
 //! * [`benchmark`]: Contains the `run_benchmarks` function which executes the
 //!   generator and executor processes, handling `stdin`/`stdout` piping.
 //! * [`cli`]: Defines the `clap`-based command-line interface.
-//! * [`command`]: Defines the shared `CommandArgs` struct.
+//! * [`manifest`]: Defines the structure of the `impa_manifest.json` file and shared
+//!   [`CommandArgs`](manifest::CommandArgs) struct.
+//! * [`figment_ext`]: Provides extensions and custom providers for the `figment`
+//!   configuration library.
 //! * [`error`]: Defines the custom error types for the library.
 //! * [`logging`]: Provides the `setup_tracing` utility.
 
@@ -40,5 +43,6 @@ pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod error;
+pub mod figment_ext;
 pub mod logging;
 pub mod manifest;

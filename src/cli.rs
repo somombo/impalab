@@ -17,7 +17,6 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::config::Tasks;
 use crate::error::ConfigError;
 
 /// Benchmarking Orchestrator
@@ -57,42 +56,19 @@ pub struct FilterArgs {
   pub exclude: Option<Vec<String>>,
 }
 
-impl RunArgs {
-  fn parse_tasks(s: &str) -> Result<Tasks, ConfigError> {
-    serde_json::from_str(s).map_err(ConfigError::ParseTasksJson)
-  }
-}
 /// Arguments for the `run` subcommand.
 #[derive(Debug, clap::Args)]
 pub struct RunArgs<F: FileReader + Default + std::fmt::Debug = RealFileSystem> {
-  /// JSON array of tasks to run, specifying the executor and arguments.
-  /// Example: '[{"executor": "cpp", "args": ["std::sort"]}, {"executor": "lean", "args": ["customSort", "--foo=bar"]}]'
-  #[arg(long, required = true, value_parser = RunArgs::parse_tasks)]
-  pub tasks: Tasks,
-
   #[command(flatten)]
   pub manifest: ManifestArgs<F>,
 
-  #[command(flatten)]
-  pub generator: GenArgs,
-}
+  /// Override configuration values.
+  #[arg(long = "set", value_name = "KEY=VALUE")]
+  pub overrides: Vec<String>,
 
-#[derive(Debug, clap::Args)]
-pub struct GenArgs {
-  /// Name of the generator component to use, or 'none' for self-contained executors.
-  #[arg(id = "generator", long, required = true)]
-  pub name: String,
-  /// Seed for the random number generator (if a generator is used).
-  #[arg(long, requires = "generator")]
-  pub seed: Option<u64>,
-  // --- Passthrough Arguments ---
-  /// All remaining arguments are passed to the data generator.
-  #[arg(
-    trailing_var_arg = true,
-    allow_hyphen_values = true,
-    requires = "generator"
-  )]
-  pub trailing_args: Vec<String>,
+  /// Path to the unified configuration JSON file, or '-' to read from stdin.
+  #[arg(long)]
+  pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, clap::Args, Default)]
@@ -104,10 +80,6 @@ pub struct ManifestArgs<F: FileReader + Default + std::fmt::Debug = RealFileSyst
 
   #[arg(id = "manifest-filename", long)]
   pub file_path: Option<PathBuf>,
-
-  /// JSON map that Override components in manifest file.
-  #[arg(id = "component-overrides", long)]
-  pub overrides: Option<String>,
 
   #[arg(skip)]
   pub file_reader: F,

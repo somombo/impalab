@@ -19,9 +19,7 @@ use impalab::benchmark::run_benchmarks;
 use impalab::builder::build_components;
 use impalab::cli::Cli;
 use impalab::cli::Commands;
-use impalab::cli::RunArgs;
 use impalab::logging::setup_tracing;
-// use tracing::Instrument;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,14 +41,10 @@ async fn main() -> Result<()> {
 
       tracing::info!("Build Process Complete.");
     }
-    Run(RunArgs {
-      generator,
-      tasks,
-      manifest,
-    }) => {
+    Run(run_args) => {
       tracing::info!("Initializing Benchmark Run...");
 
-      run_benchmarks(generator.into(), tasks, manifest.try_into()?).await?;
+      run_benchmarks(run_args.try_into()?).await?;
 
       tracing::info!("Benchmark Run Complete.");
     }

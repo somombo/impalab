@@ -89,9 +89,6 @@ pub enum BuildError {
 /// Errors related to configuration resolution (src/config.rs).
 #[derive(Error, Debug)]
 pub enum ConfigError {
-  #[error("No manifest file available and no manifest override provided")]
-  NoManifestFileOrOverride,
-
   #[error("Failed to read manifest file: {path}")]
   ReadManifest {
     path: PathBuf,
@@ -102,11 +99,23 @@ pub enum ConfigError {
   #[error("Failed to parse manifest JSON")]
   ParseManifest(#[from] serde_json::Error),
 
-  #[error("Failed to parse --tasks as JSON: {0}")]
-  ParseTasksJson(#[source] serde_json::Error),
+  #[error("Array overrides are not supported. Found array index or brackets in key: '{key}'")]
+  ArrayOverrideNotSupported { key: String },
 
-  #[error("Failed to parse --component_overrides JSON: {0}")]
-  ParseCmpOverrideJson(#[source] serde_json::Error),
+  #[error("Invalid override format for '{0}'. Expected KEY=VALUE")]
+  InvalidOverrideFormat(String),
+
+  #[error("Expected configuration data on stdin but stdin is a terminal")]
+  MissingStdinData,
+
+  #[error("Failed to read from stdin")]
+  ReadStdin(#[source] std::io::Error),
+
+  #[error("Failed to parse configuration: {0}")]
+  ParseConfig(#[source] serde_json::Error),
+
+  #[error("Configuration extraction error: {0}")]
+  FigmentError(Box<figment::Error>),
 
   #[error("Executor component should be of `ComponentType::Executor`")]
   ExecutorIncorrectComponentType,
@@ -121,6 +130,21 @@ pub enum ConfigError {
 
   #[error("No executable path found for language '{language}'. Searched overrides and manifest.")]
   ExecExecutableNotFound { language: String },
+
+  #[error("Component '{component_name}' should be of type`{component_type:?}`")]
+  IncorrectComponentType {
+    component_name: String,
+    component_type: ComponentType,
+  },
+
+  #[error("Component '{component_name}' not found in manifest. Available: {available:?}.")]
+  ComponentNotFound {
+    component_name: String,
+    available: Vec<String>,
+  },
+
+  #[error("Component resolution graph validation failed: {0:?}")]
+  GraphValidationFailed(Vec<ConfigError>),
 }
 
 /// Errors related to the benchmark execution (src/benchmark.rs).
@@ -188,23 +212,11 @@ pub enum BenchmarkError {
     source: std::num::ParseIntError,
   },
 
-  #[error("Failed to read {target} stderr")]
+  #[error("Failed to read {component_type:?} stderr")]
   ReadStderr {
-    target: &'static str,
+    component_type: ComponentType,
     #[source]
     source: std::io::Error,
-  },
-
-  #[error("Component '{component_name}' should be of type`{component_type:?}`")]
-  IncorrectComponentType {
-    component_name: String,
-    component_type: ComponentType,
-  },
-
-  #[error("Component '{component_name}' not found in manifest. Available: {available:?}.")]
-  ComponentNotFound {
-    component_name: String,
-    available: Vec<String>,
   },
 
   #[error("Generator process failed with exit code: {code:?}")]

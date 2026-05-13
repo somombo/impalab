@@ -22,7 +22,7 @@ To contribute code, it helps to understand the core architecture.
 The `impa` binary is the main orchestrator, built in Rust. It has two primary commands:
 
 1.  **`impa build`**: This command crawls the component directories, finds all `impafile.toml` files, runs their optional `[build]` step, and saves the `[run]` commands to the `impa_manifest.json`.
-2.  **`impa run`**: This command reads the `impa_manifest.json` (or CLI overrides), spawns the chosen `generator` process, and pipes its `stdout` to the `stdin` of one or more `executor` processes. It captures the `stdout` from the executors and prints it as JSONL.
+2.  **`impa run`**: This command reads the unified configuration hierarchy (combining `impa_manifest.json`, `--config` files, and `--set` CLI overrides), spawns the chosen `generator` process, and pipes its `stdout` to the `stdin` of one or more `executor` processes. It captures the `stdout` from the executors and prints it as JSONL.
 
 ### The `impafile.toml` Contract
 
