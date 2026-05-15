@@ -32,6 +32,8 @@ struct RawConfig {
   tasks: Option<Vec<Task>>,
   #[serde(default)]
   components: HashMap<String, ManifestComponent>,
+  #[serde(default)]
+  labels: HashMap<String, String>,
 }
 
 impl RawConfig {
@@ -97,10 +99,16 @@ impl RawConfig {
         match self.resolve_component(&task.executor_name, ComponentType::Executor, root_dir) {
           Ok(mut cmp) => {
             cmp.run.args.extend(task.args.clone());
+
+            let mut effective_labels = self.labels.clone();
+            effective_labels.extend(task.labels.clone());
+
             resolved_tasks.push(ResolvedTask {
               executor: task.executor_name.clone(),
               args: task.args.clone(),
-              command: cmp.run,
+              command_args: cmp.run,
+
+              effective_labels,
             });
           }
           Err(e) => errors.push(e),
@@ -126,13 +134,17 @@ pub struct Task {
 
   #[serde(default)]
   pub args: Vec<String>,
+
+  #[serde(default)]
+  pub labels: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTask {
   pub executor: String,
   pub args: Vec<String>,
-  pub command: CommandArgs,
+  pub command_args: CommandArgs,
+  pub effective_labels: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -448,6 +460,7 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "my-exec".to_string(),
         args: vec!["run-this".to_string()],
+        labels: HashMap::new(),
       }]),
       components: {
         let mut map = HashMap::new();
@@ -475,12 +488,16 @@ mod tests {
         );
         map
       },
+      ..Default::default()
     };
 
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
     assert!(resolved.generator.is_some());
     assert_eq!(resolved.tasks.len(), 1);
-    assert_eq!(resolved.tasks[0].command.args, vec!["base-arg", "run-this"]);
+    assert_eq!(
+      resolved.tasks[0].command_args.args,
+      vec!["base-arg", "run-this"]
+    );
   }
 
   #[test]
@@ -490,8 +507,10 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "missing-exec".to_string(),
         args: vec![],
+        labels: HashMap::new(),
       }]),
       components: HashMap::new(),
+      ..Default::default()
     };
 
     let res = raw.resolve_all(std::path::Path::new("."));
@@ -523,8 +542,10 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "not-an-executor".to_string(),
         args: vec![],
+        labels: HashMap::new(),
       }]),
       components,
+      ..Default::default()
     };
 
     let res = raw.resolve_all(std::path::Path::new("."));
@@ -537,5 +558,118 @@ mod tests {
       }
       _ => panic!("Expected GraphValidationFailed with IncorrectComponentType"),
     }
+  }
+
+  #[test]
+  fn test_raw_config_resolve_labels_merge() {
+    let mut components = HashMap::new();
+    components.insert(
+      "exec".to_string(),
+      ManifestComponent {
+        component_type: ComponentType::Executor,
+        run: CommandArgs {
+          command: PathBuf::from("bin"),
+          args: vec![],
+          working_dir: None,
+        },
+      },
+    );
+
+    let mut global_labels = HashMap::new();
+    global_labels.insert("env".to_string(), "prod".to_string());
+    global_labels.insert("shared".to_string(), "base".to_string());
+
+    let mut task_labels = HashMap::new();
+    task_labels.insert("shared".to_string(), "override".to_string());
+    task_labels.insert("task-only".to_string(), "value".to_string());
+
+    let raw = RawConfig {
+      labels: global_labels,
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        labels: task_labels,
+      }]),
+      components,
+      ..Default::default()
+    };
+
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    let labels = &resolved.tasks[0].effective_labels;
+
+    assert_eq!(labels.get("env").unwrap(), "prod");
+    assert_eq!(labels.get("shared").unwrap(), "override");
+    assert_eq!(labels.get("task-only").unwrap(), "value");
+    assert_eq!(labels.len(), 3);
+  }
+
+  #[test]
+  fn test_resolve_labels() {
+    let mut components = HashMap::new();
+    components.insert(
+      "my-exec".to_string(),
+      ManifestComponent {
+        component_type: ComponentType::Executor,
+        run: CommandArgs {
+          command: PathBuf::from("exec"),
+          args: vec![],
+          working_dir: None,
+        },
+      },
+    );
+
+    let mut global_labels = HashMap::new();
+    global_labels.insert("env".to_string(), "prod".to_string());
+    global_labels.insert("version".to_string(), "1.0".to_string());
+
+    let mut task_labels = HashMap::new();
+    task_labels.insert("version".to_string(), "2.0".to_string());
+    task_labels.insert("tier".to_string(), "high".to_string());
+
+    let raw = RawConfig {
+      generator: None,
+      labels: global_labels,
+      tasks: Some(vec![
+        Task {
+          executor_name: "my-exec".to_string(),
+          args: vec![],
+          labels: Default::default(),
+        },
+        Task {
+          executor_name: "my-exec".to_string(),
+          args: vec![],
+          labels: task_labels,
+        },
+      ]),
+      components,
+    };
+
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+
+    // Task 0 inherits global labels
+    assert_eq!(
+      resolved.tasks[0].effective_labels.get("env").unwrap(),
+      "prod"
+    );
+    assert_eq!(
+      resolved.tasks[0].effective_labels.get("version").unwrap(),
+      "1.0"
+    );
+    assert_eq!(resolved.tasks[0].effective_labels.len(), 2);
+
+    // Task 1 merges/overwrites labels
+    assert_eq!(
+      resolved.tasks[1].effective_labels.get("env").unwrap(),
+      "prod"
+    );
+    assert_eq!(
+      resolved.tasks[1].effective_labels.get("version").unwrap(),
+      "2.0"
+    );
+    assert_eq!(
+      resolved.tasks[1].effective_labels.get("tier").unwrap(),
+      "high"
+    );
+    assert_eq!(resolved.tasks[1].effective_labels.len(), 3);
   }
 }
