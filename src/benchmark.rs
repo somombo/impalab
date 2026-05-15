@@ -35,6 +35,7 @@ struct BenchmarkMeta {
   #[serde(rename = "args")]
   task_args: Vec<String>,
 
+  rep_index: usize,
   labels: HashMap<String, String>,
 }
 
@@ -60,6 +61,8 @@ pub async fn run_benchmarks(
     "generator = none".to_string()
   };
 
+  let max_reps = tasks.iter().map(|t| t.effective_reps).max().unwrap_or(1);
+
   let span = tracing::info_span!(
     "run_benchmarks",
     %gen_info
@@ -67,28 +70,49 @@ pub async fn run_benchmarks(
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for task in tasks.iter().enumerate() {
-      let executor = task.1.executor.clone();
-      let exec_span = tracing::info_span!("run_executor", executor = %executor);
+    for rep_index in 0..max_reps {
+      for task in tasks.iter().enumerate() {
+        let reps = task.1.effective_reps;
+        if rep_index >= reps {
+          continue;
+        }
 
-      let result = async {
-        tracing::info!("Running natively for: {}...", executor);
+        let executor = task.1.executor.clone();
+        let exec_span = tracing::info_span!("run_executor", executor = %executor);
 
-        match run_pipeline(gen_cmd_args.as_ref(), task).await {
-          Ok(_) => {
-            tracing::info!("Finished running pipeline: {}", executor);
-            Ok(())
-          }
-          Err(e) => {
-            tracing::error!(error = %e, "Pipeline failed for executor: {}", executor);
-            Err(e)
+        let result = async {
+          tracing::info!(
+            "Running natively for: {} (rep_index={} out of {} reps)...",
+            executor,
+            rep_index,
+            reps
+          );
+
+          match run_pipeline(gen_cmd_args.as_ref(), task, rep_index).await {
+            Ok(_) => {
+              tracing::info!(
+                "Finished running pipeline: {} (rep_index {})",
+                executor,
+                rep_index
+              );
+              Ok(())
+            }
+            Err(e) => {
+              tracing::error!(
+                error = %e,
+                "Pipeline failed for executor: {} (rep_index {})",
+                executor,
+                rep_index
+              );
+              Err(e)
+            }
           }
         }
-      }
-      .instrument(exec_span)
-      .await;
+        .instrument(exec_span)
+        .await;
 
-      result?
+        result?
+      }
     }
     tracing::info!("--- Benchmark run complete ---");
     Ok(())
@@ -108,8 +132,10 @@ async fn run_pipeline(
       args: task_args,
       command_args,
       effective_labels,
+      effective_reps: _,
     },
   ): (usize, &ResolvedTask),
+  rep_index: usize,
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
@@ -197,6 +223,7 @@ async fn run_pipeline(
     task_index,
     executor: executor_name.clone(),
     task_args: task_args.clone(),
+    rep_index,
     labels: effective_labels.clone(),
   };
   let stdout_task = tokio::spawn(

@@ -32,6 +32,7 @@ struct RawConfig {
   tasks: Option<Vec<Task>>,
   #[serde(default)]
   components: HashMap<String, ManifestComponent>,
+  reps: Option<usize>,
   #[serde(default)]
   labels: HashMap<String, String>,
 }
@@ -100,6 +101,16 @@ impl RawConfig {
           Ok(mut cmp) => {
             cmp.run.args.extend(task.args.clone());
 
+            let effective_reps = task.reps.or(self.reps).unwrap_or(1);
+
+            if effective_reps == 0 {
+              tracing::warn!(
+                "Task with executor '{}' has 0 reps.. Skipping its execution",
+                task.executor_name
+              );
+              continue;
+            }
+
             let mut effective_labels = self.labels.clone();
             effective_labels.extend(task.labels.clone());
 
@@ -108,6 +119,7 @@ impl RawConfig {
               args: task.args.clone(),
               command_args: cmp.run,
 
+              effective_reps,
               effective_labels,
             });
           }
@@ -135,6 +147,7 @@ pub struct Task {
   #[serde(default)]
   pub args: Vec<String>,
 
+  pub reps: Option<usize>,
   #[serde(default)]
   pub labels: HashMap<String, String>,
 }
@@ -144,6 +157,7 @@ pub struct ResolvedTask {
   pub executor: String,
   pub args: Vec<String>,
   pub command_args: CommandArgs,
+  pub effective_reps: usize,
   pub effective_labels: HashMap<String, String>,
 }
 
@@ -460,6 +474,7 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "my-exec".to_string(),
         args: vec!["run-this".to_string()],
+        reps: None,
         labels: HashMap::new(),
       }]),
       components: {
@@ -507,6 +522,7 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "missing-exec".to_string(),
         args: vec![],
+        reps: None,
         labels: HashMap::new(),
       }]),
       components: HashMap::new(),
@@ -542,6 +558,7 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "not-an-executor".to_string(),
         args: vec![],
+        reps: None,
         labels: HashMap::new(),
       }]),
       components,
@@ -558,6 +575,67 @@ mod tests {
       }
       _ => panic!("Expected GraphValidationFailed with IncorrectComponentType"),
     }
+  }
+
+  #[test]
+  fn test_raw_config_resolve_reps_fallback() {
+    let mut components = HashMap::new();
+    components.insert(
+      "exec".to_string(),
+      ManifestComponent {
+        component_type: ComponentType::Executor,
+        run: CommandArgs {
+          command: PathBuf::from("bin"),
+          args: vec![],
+          working_dir: None,
+        },
+      },
+    );
+
+    // Task reps override global reps
+    let raw = RawConfig {
+      reps: Some(5),
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        reps: Some(10),
+        labels: HashMap::new(),
+      }]),
+      components: components.clone(),
+      ..Default::default()
+    };
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    assert_eq!(resolved.tasks[0].effective_reps, 10);
+
+    // Global reps fallback
+    let raw = RawConfig {
+      reps: Some(5),
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        reps: None,
+        labels: HashMap::new(),
+      }]),
+      components: components.clone(),
+      ..Default::default()
+    };
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    assert_eq!(resolved.tasks[0].effective_reps, 5);
+
+    // Default to 1
+    let raw = RawConfig {
+      reps: None,
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        reps: None,
+        labels: HashMap::new(),
+      }]),
+      components: components.clone(),
+      ..Default::default()
+    };
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    assert_eq!(resolved.tasks[0].effective_reps, 1);
   }
 
   #[test]
@@ -588,6 +666,7 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "exec".to_string(),
         args: vec![],
+        reps: None,
         labels: task_labels,
       }]),
       components,
@@ -604,7 +683,7 @@ mod tests {
   }
 
   #[test]
-  fn test_resolve_labels() {
+  fn test_resolve_reps_and_labels() {
     let mut components = HashMap::new();
     components.insert(
       "my-exec".to_string(),
@@ -628,16 +707,19 @@ mod tests {
 
     let raw = RawConfig {
       generator: None,
+      reps: Some(5),
       labels: global_labels,
       tasks: Some(vec![
         Task {
           executor_name: "my-exec".to_string(),
           args: vec![],
+          reps: None,
           labels: Default::default(),
         },
         Task {
           executor_name: "my-exec".to_string(),
           args: vec![],
+          reps: Some(10),
           labels: task_labels,
         },
       ]),
@@ -646,7 +728,8 @@ mod tests {
 
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
 
-    // Task 0 inherits global labels
+    // Task 0 inherits global reps and labels
+    assert_eq!(resolved.tasks[0].effective_reps, 5);
     assert_eq!(
       resolved.tasks[0].effective_labels.get("env").unwrap(),
       "prod"
@@ -657,7 +740,8 @@ mod tests {
     );
     assert_eq!(resolved.tasks[0].effective_labels.len(), 2);
 
-    // Task 1 merges/overwrites labels
+    // Task 1 overrides global reps and merges/overwrites labels
+    assert_eq!(resolved.tasks[1].effective_reps, 10);
     assert_eq!(
       resolved.tasks[1].effective_labels.get("env").unwrap(),
       "prod"
