@@ -13,20 +13,20 @@
 // limitations under the License.
 use crate::cli::RunArgs;
 use crate::error::ConfigError;
+use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use crate::manifest::ManifestComponent;
 
 use crate::figment_ext::*;
 
 use serde::Deserialize;
-use serde::Serialize;
 
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::io::Read;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone, Default)]
 struct RawConfig {
   generator: Option<RawGenerator>,
   tasks: Option<Vec<Task>>,
@@ -80,12 +80,12 @@ impl RawConfig {
     let mut resolved_generator = None;
     if let Some(generator_cfg) = self.generator.as_ref() {
       match self.resolve_component(&generator_cfg.name, ComponentType::Generator, root_dir) {
-        Ok(mut cmd) => {
+        Ok(mut cmp) => {
           let seed = generator_cfg.seed.unwrap_or_else(rand::random);
           tracing::info!(seed, "Using generator seed");
-          cmd.run.args.push(format!("--seed={}", seed));
-          cmd.run.args.extend(generator_cfg.args.to_owned());
-          resolved_generator = Some(cmd);
+          cmp.run.args.push(format!("--seed={}", seed));
+          cmp.run.args.extend(generator_cfg.args.to_owned());
+          resolved_generator = Some(cmp.run);
         }
         Err(e) => errors.push(e),
       }
@@ -95,11 +95,12 @@ impl RawConfig {
     if let Some(tasks) = self.tasks.as_ref() {
       for task in tasks {
         match self.resolve_component(&task.executor_name, ComponentType::Executor, root_dir) {
-          Ok(mut cmd) => {
-            cmd.run.args.extend(task.args.clone());
+          Ok(mut cmp) => {
+            cmp.run.args.extend(task.args.clone());
             resolved_tasks.push(ResolvedTask {
-              raw_task: task.clone(),
-              component: cmd,
+              executor: task.executor_name.clone(),
+              args: task.args.clone(),
+              command: cmp.run,
             });
           }
           Err(e) => errors.push(e),
@@ -118,7 +119,7 @@ impl RawConfig {
   }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Hash)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Task {
   #[serde(rename = "executor")]
   pub executor_name: String,
@@ -129,17 +130,18 @@ pub struct Task {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTask {
-  pub raw_task: Task,
-  pub component: ManifestComponent,
+  pub executor: String,
+  pub args: Vec<String>,
+  pub command: CommandArgs,
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
-  pub generator: Option<ManifestComponent>,
+  pub generator: Option<CommandArgs>,
   pub tasks: Vec<ResolvedTask>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 struct RawGenerator {
   name: String,
   seed: Option<u64>,
@@ -478,10 +480,7 @@ mod tests {
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
     assert!(resolved.generator.is_some());
     assert_eq!(resolved.tasks.len(), 1);
-    assert_eq!(
-      resolved.tasks[0].component.run.args,
-      vec!["base-arg", "run-this"]
-    );
+    assert_eq!(resolved.tasks[0].command.args, vec!["base-arg", "run-this"]);
   }
 
   #[test]

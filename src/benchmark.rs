@@ -13,11 +13,9 @@
 // limitations under the License.
 use crate::config::ResolvedConfig;
 use crate::config::ResolvedTask;
-use crate::config::Task;
 use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
-use crate::manifest::ManifestComponent;
 use serde::Serialize;
 use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
@@ -32,8 +30,10 @@ use tracing::Instrument;
 struct BenchmarkResult<'a> {
   task_index: usize,
 
-  #[serde(flatten)]
-  task: &'a Task,
+  executor: &'a str,
+
+  #[serde(rename = "args")]
+  task_args: &'a [String],
 
   data_id: String,
   duration: u64,
@@ -53,9 +53,9 @@ pub async fn run_benchmarks(
   let gen_info = if let Some(gen_cmd) = &gen_cmd_args {
     format!(
       "dir = {:?}, generator = {}, args = {:?}",
-      gen_cmd.run.working_dir,
-      gen_cmd.run.command.display(),
-      gen_cmd.run.args
+      gen_cmd.working_dir,
+      gen_cmd.command.display(),
+      gen_cmd.args
     )
   } else {
     "generator = none".to_string()
@@ -68,21 +68,14 @@ pub async fn run_benchmarks(
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for (
-      task_index,
-      ResolvedTask {
-        raw_task: task,
-        component: exec_cmd_args,
-      },
-    ) in tasks.into_iter().enumerate()
-    {
-      let executor = task.executor_name.clone();
-      let lang_span = tracing::info_span!("run_language", executor = %executor);
+    for task in tasks.into_iter().enumerate() {
+      let executor = task.1.executor.clone();
+      let exec_span = tracing::info_span!("run_executor", executor = %executor);
 
       let result = async {
         tracing::info!("Running natively for: {}...", executor);
 
-        match run_pipeline(gen_cmd_args.as_ref(), exec_cmd_args, (task_index, task)).await {
+        match run_pipeline(gen_cmd_args.as_ref(), task).await {
           Ok(_) => {
             tracing::info!("Finished running pipeline: {}", executor);
             Ok(())
@@ -93,7 +86,7 @@ pub async fn run_benchmarks(
           }
         }
       }
-      .instrument(lang_span)
+      .instrument(exec_span)
       .await;
 
       result?
@@ -108,17 +101,20 @@ pub async fn run_benchmarks(
 /// Spawns and manages the generator -> executor pipeline for one language.
 /// Handles both pipelined and self-contained (no generator) runs.
 async fn run_pipeline(
-  generator_cmd_args: Option<&ManifestComponent>,
-  ManifestComponent {
-    run:
-      CommandArgs {
-        command: exec_cmd_path,
-        args: exec_args,
-        working_dir: exec_dir,
-      },
-    ..
-  }: ManifestComponent,
-  (task_index, task): (usize, Task),
+  generator_cmd_args: Option<&CommandArgs>,
+  (
+    task_index,
+    ResolvedTask {
+      executor: executor_name,
+      args: task_args,
+      command:
+        CommandArgs {
+          command: exec_cmd_path,
+          args: exec_args,
+          working_dir: exec_dir,
+        },
+    },
+  ): (usize, ResolvedTask),
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
@@ -136,14 +132,10 @@ async fn run_pipeline(
   }
 
   // --- Configure Generator (if provided) ---
-  if let Some(ManifestComponent {
-    run:
-      CommandArgs {
-        args: gen_args,
-        command: gen_cmd_path,
-        working_dir: gen_dir,
-      },
-    ..
+  if let Some(CommandArgs {
+    args: gen_args,
+    command: gen_cmd_path,
+    working_dir: gen_dir,
   }) = generator_cmd_args
   {
     // --- Pipelined Mode ---
@@ -206,12 +198,15 @@ async fn run_pipeline(
     .ok_or(BenchmarkError::PipeExecStderr)?;
 
   // --- Concurrently process all IO ---
-  let executor_name = &task.executor_name;
-  let task_ = task.clone();
-  let stdout_task = tokio::spawn(
-    async move { process_executor_stdout(exec_stdout, task_index, &task_).await }
+  let executor_name_ = executor_name.clone();
+  let task_args_ = task_args.clone();
+  let stdout_task =
+    tokio::spawn(
+      async move {
+        process_executor_stdout(exec_stdout, task_index, &executor_name_, &task_args_).await
+      }
       .instrument(tracing::info_span!("stdout_handler", executor = %executor_name)),
-  );
+    );
 
   let exec_stderr_task = tokio::spawn(
     read_and_log_stderr(exec_stderr, ComponentType::Executor)
@@ -264,7 +259,8 @@ async fn run_pipeline(
 async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
   task_index: usize,
-  task: &Task,
+  executor: &str,
+  task_args: &[String],
 ) -> Result<(), BenchmarkError> {
   let mut reader = BufReader::new(stream).lines();
   while let Some(line) = reader
@@ -280,7 +276,8 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
       Ok((data_id, duration)) => {
         let result = BenchmarkResult {
           task_index,
-          task,
+          executor,
+          task_args,
           data_id,
           duration,
         };
