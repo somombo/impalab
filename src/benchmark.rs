@@ -17,6 +17,7 @@ use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
@@ -25,18 +26,16 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tracing::Instrument;
 
-/// The structure of a single benchmark result, used for JSON serialization.
 #[derive(Debug, Serialize)]
-struct BenchmarkResult<'a> {
+struct BenchmarkMeta {
   task_index: usize,
 
-  executor: &'a str,
+  executor: String,
 
   #[serde(rename = "args")]
-  task_args: &'a [String],
+  task_args: Vec<String>,
 
-  data_id: String,
-  duration: u64,
+  labels: HashMap<String, String>,
 }
 
 /// Main benchmark runner.
@@ -68,7 +67,7 @@ pub async fn run_benchmarks(
 
   async {
     tracing::info!("--- Starting Benchmark Pipeline ---");
-    for task in tasks.into_iter().enumerate() {
+    for task in tasks.iter().enumerate() {
       let executor = task.1.executor.clone();
       let exec_span = tracing::info_span!("run_executor", executor = %executor);
 
@@ -81,8 +80,8 @@ pub async fn run_benchmarks(
             Ok(())
           }
           Err(e) => {
-            tracing::error!(error = %e, "Pipeline failed for language: {}", executor);
-            Err(e) // Propagate the error
+            tracing::error!(error = %e, "Pipeline failed for executor: {}", executor);
+            Err(e)
           }
         }
       }
@@ -107,27 +106,23 @@ async fn run_pipeline(
     ResolvedTask {
       executor: executor_name,
       args: task_args,
-      command:
-        CommandArgs {
-          command: exec_cmd_path,
-          args: exec_args,
-          working_dir: exec_dir,
-        },
+      command_args,
+      effective_labels,
     },
-  ): (usize, ResolvedTask),
+  ): (usize, &ResolvedTask),
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
 
   // --- Configure Executor Command ---
-  let mut exec_cmd = Command::new(exec_cmd_path);
+  let mut exec_cmd = Command::new(&command_args.command);
   exec_cmd
-    .args(exec_args) // Add base args from manifest/override
+    .args(&command_args.args) // Add base args from manifest/override
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(true);
 
-  if let Some(dir) = exec_dir {
+  if let Some(dir) = &command_args.working_dir {
     exec_cmd.current_dir(dir);
   }
 
@@ -198,15 +193,16 @@ async fn run_pipeline(
     .ok_or(BenchmarkError::PipeExecStderr)?;
 
   // --- Concurrently process all IO ---
-  let executor_name_ = executor_name.clone();
-  let task_args_ = task_args.clone();
-  let stdout_task =
-    tokio::spawn(
-      async move {
-        process_executor_stdout(exec_stdout, task_index, &executor_name_, &task_args_).await
-      }
+  let meta = BenchmarkMeta {
+    task_index,
+    executor: executor_name.clone(),
+    task_args: task_args.clone(),
+    labels: effective_labels.clone(),
+  };
+  let stdout_task = tokio::spawn(
+    async move { process_executor_stdout(exec_stdout, &meta).await }
       .instrument(tracing::info_span!("stdout_handler", executor = %executor_name)),
-    );
+  );
 
   let exec_stderr_task = tokio::spawn(
     read_and_log_stderr(exec_stderr, ComponentType::Executor)
@@ -258,10 +254,17 @@ async fn run_pipeline(
 /// Reads lines from the executor's stdout, parses them, and prints them as JSON.
 async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
-  task_index: usize,
-  executor: &str,
-  task_args: &[String],
+  meta: &BenchmarkMeta,
 ) -> Result<(), BenchmarkError> {
+  /// The structure of a single benchmark result, used for JSON serialization.
+  #[derive(Debug, Serialize)]
+  struct BenchmarkResult<'a> {
+    #[serde(flatten)]
+    meta: &'a BenchmarkMeta,
+    data_id: String,
+    duration: u64,
+  }
+
   let mut reader = BufReader::new(stream).lines();
   while let Some(line) = reader
     .next_line()
@@ -275,9 +278,7 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     match parse_native_line(&line) {
       Ok((data_id, duration)) => {
         let result = BenchmarkResult {
-          task_index,
-          executor,
-          task_args,
+          meta,
           data_id,
           duration,
         };
