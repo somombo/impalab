@@ -283,12 +283,21 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
   meta: &BenchmarkMeta,
 ) -> Result<(), BenchmarkError> {
+  /// Represents the conditional output: either standard `data_id` or parsed `gen_meta`.
+  #[derive(Debug, Serialize)]
+  #[serde(untagged)]
+  enum DataIdOrMeta {
+    Meta { gen_meta: serde_json::Value },
+    DataId { data_id: String },
+  }
+
   /// The structure of a single benchmark result, used for JSON serialization.
   #[derive(Debug, Serialize)]
   struct BenchmarkResult<'a> {
     #[serde(flatten)]
     meta: &'a BenchmarkMeta,
-    data_id: String,
+    #[serde(flatten)]
+    data: DataIdOrMeta,
     duration: u64,
   }
 
@@ -304,9 +313,24 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
 
     match parse_native_line(&line) {
       Ok((data_id, duration)) => {
+        let data = if let Some(encoded) = data_id.strip_prefix("data:application/json;base64,") {
+          use base64::Engine;
+          if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+            if let Ok(gen_meta) = serde_json::from_slice(&decoded) {
+              DataIdOrMeta::Meta { gen_meta }
+            } else {
+              DataIdOrMeta::DataId { data_id }
+            }
+          } else {
+            DataIdOrMeta::DataId { data_id }
+          }
+        } else {
+          DataIdOrMeta::DataId { data_id }
+        };
+
         let result = BenchmarkResult {
           meta,
-          data_id,
+          data,
           duration,
         };
         let json_result =
@@ -349,7 +373,22 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
 
 /// Parses a single line of `data_id,duration` CSV.
 fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
-  let parts: Vec<&str> = line.split(',').collect();
+  let parts: Vec<&str>;
+  let mut temp_parts = vec![];
+
+  if line.starts_with("data:application/json;base64,") {
+    let prefix_len = "data:application/json;base64,".len();
+    if let Some(comma_pos) = line[prefix_len..].find(',') {
+      let absolute_comma_pos = prefix_len + comma_pos;
+      temp_parts.push(&line[..absolute_comma_pos]);
+      temp_parts.push(&line[absolute_comma_pos + 1..]);
+      parts = temp_parts;
+    } else {
+      parts = line.split(',').collect();
+    }
+  } else {
+    parts = line.split(',').collect();
+  }
 
   if parts.len() != 2 {
     return Err(BenchmarkError::CsvParts {

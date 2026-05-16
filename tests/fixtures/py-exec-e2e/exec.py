@@ -50,13 +50,39 @@ def main():
             print(f'Error: Line is empty before EOF', file=sys.stderr)
             sys.exit(1)
         
-        parts = line.split(",")
-        if len(parts) < 2:
-            print(f'Error: Line is malformed. Cannot parse: `{line}`', file=sys.stderr)
-            sys.exit(1)
+        # We need to split by comma, but some comma might be part of the test data ID
+        # Wait, the test input `data:application/json;base64,eyJ0ZXN0X21ldGEiOiAidmFsdWUiLCJzZWVkIjogNDJ9`
+        # actually has a comma in it!
+        # So parts[0] is `data:application/json;base64`, not the full thing!
 
-        test_data_id = parts[0]
-        input_data = parts[1:]
+        # We should find the first comma if it's a regular id,
+        # but what if it's the `data:application/json;base64,` prefix?
+        # Actually in gen.py, the id is outputted, and then followed by other elements
+        # separated by commas:
+        # print(f"data:application/json;base64,eyJ0ZXN0X21ldGEiOiAidmFsdWUiLCJzZWVkIjogNDJ9,{seed},10,20,30")
+
+        # So let's parse differently based on prefix
+        if line.startswith("data:application/json;base64,"):
+            # find the second comma!
+            # first comma is at len("data:application/json;base64")
+            first_comma = len("data:application/json;base64")
+            second_comma = line.find(",", first_comma + 1)
+
+            if second_comma == -1:
+                print(f'Error: Line is malformed. Cannot parse: `{line}`', file=sys.stderr)
+                sys.exit(1)
+
+            test_data_id = line[:second_comma]
+            input_data = line[second_comma+1:].split(",")
+        else:
+            parts = line.split(",")
+            if len(parts) < 2:
+                print(f'Error: Line is malformed. Cannot parse: `{line}`', file=sys.stderr)
+                sys.exit(1)
+
+            test_data_id = parts[0]
+            input_data = parts[1:]
+
         print(f'Info: Received generated data: `{(test_data_id, input_data)}`', file=sys.stderr)
         
         example_duration = run(target, input_data, **kwargs)

@@ -19,6 +19,9 @@ for arg in sys.argv:
     if arg.startswith("--seed="):
         seed = arg.split("=")[1]
 
-# Print one test case: id "test_case_1"
-# We'll include the seed in the output to prove it was received.
+# Print one normal test case: id "test_case_1"
 print(f"test_case_1,{seed},10,20,30")
+
+# Print one embedded json metadata test case:
+# eyJ0ZXN0X21ldGEiOiAidmFsdWUiLCJzZWVkIjogNDJ9 -> {"test_meta": "value","seed": 42}
+print(f"data:application/json;base64,eyJ0ZXN0X21ldGEiOiAidmFsdWUiLCJzZWVkIjogNDJ9,{seed},10,20,30")

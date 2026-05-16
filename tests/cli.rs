@@ -160,7 +160,13 @@ fn test_build_and_run_e2e() {
       predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"labels":{},"gen_meta":{"seed":42,"test_meta":"value"},"duration":1234}"#)
+    )
+    .stdout(
       predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":12}"#)
+    )
+    .stdout(
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"labels":{},"gen_meta":{"seed":42,"test_meta":"value"},"duration":12}"#)
     );
 }
 
@@ -245,7 +251,13 @@ fn test_build_and_run_e2e_stdin_config() {
       predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"labels":{},"gen_meta":{"seed":42,"test_meta":"value"},"duration":1234}"#)
+    )
+    .stdout(
       predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":12}"#)
+    )
+    .stdout(
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"labels":{},"gen_meta":{"seed":42,"test_meta":"value"},"duration":12}"#)
     );
 }
 
