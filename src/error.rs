@@ -193,7 +193,17 @@ pub enum BenchmarkError {
   ReadExecStdout(#[source] std::io::Error),
 
   #[error("Failed to serialize benchmark result")]
-  SerializeResult(#[from] serde_json::Error),
+  SerializeResult(#[source] serde_json::Error),
+
+  #[error(
+    "Failed to parse {context} as JSON. Ensure your executor is outputting minified JSON on a single line without newline characters (\\n). Raw segment: '{raw_segment}'"
+  )]
+  MalformedJSON {
+    context: String,
+    raw_segment: String,
+    #[source]
+    source: serde_json::Error,
+  },
 
   #[error("Malformed output line from executor: {line}")]
   MalformedExecOutput {

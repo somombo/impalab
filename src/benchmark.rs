@@ -16,6 +16,7 @@ use crate::config::ResolvedTask;
 use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
+use base64::Engine;
 use serde::Serialize;
 
 use std::process::Stdio;
@@ -279,6 +280,25 @@ async fn run_pipeline(
   Ok(())
 }
 
+fn extract_gen_meta(token: &str) -> Result<Option<serde_json::Value>, BenchmarkError> {
+  if let Some(encoded) = token.strip_prefix("meta:") {
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+      match serde_json::from_slice(&decoded) {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => Err(BenchmarkError::MalformedJSON {
+          context: "gen_meta".to_string(),
+          raw_segment: token.to_string(),
+          source: e,
+        }),
+      }
+    } else {
+      Ok(None)
+    }
+  } else {
+    Ok(None)
+  }
+}
+
 /// Reads lines from the executor's stdout, parses them, and prints them as JSON.
 async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
@@ -289,7 +309,12 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
   struct BenchmarkResult<'a> {
     #[serde(flatten)]
     meta: &'a BenchmarkMeta,
-    data_id: String,
+
+    data_token: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gen_meta: Option<serde_json::Value>,
+
     metric: serde_json::Number,
   }
 
@@ -304,10 +329,17 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     }
 
     match parse_native_line(&line) {
-      Ok((data_id, metric)) => {
+      Ok((data_token, metric)) => {
+        let gen_meta =
+          extract_gen_meta(&data_token).map_err(|e| BenchmarkError::MalformedExecOutput {
+            line: line.clone(),
+            source: Box::new(e),
+          })?;
+
         let result = BenchmarkResult {
           meta,
-          data_id,
+          gen_meta,
+          data_token,
           metric,
         };
         let json_result =
@@ -348,7 +380,7 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   Ok(())
 }
 
-/// Parses a single line of `data_id,metric` CSV.
+/// Parses a single line of `data_token,metric` CSV.
 fn parse_native_line(line: &str) -> Result<(String, serde_json::Number), BenchmarkError> {
   let parts: Vec<&str> = line.split(',').collect();
 
@@ -359,7 +391,7 @@ fn parse_native_line(line: &str) -> Result<(String, serde_json::Number), Benchma
     });
   }
 
-  let data_id = parts[0].to_string();
+  let data_token = parts[0].to_string();
   let metric = serde_json::from_str::<serde_json::Number>(parts[1]).map_err(|e| {
     BenchmarkError::ParseMetric {
       metric: parts[1].to_string(),
@@ -367,7 +399,7 @@ fn parse_native_line(line: &str) -> Result<(String, serde_json::Number), Benchma
     }
   })?;
 
-  Ok((data_id, metric))
+  Ok((data_token, metric))
 }
 
 #[cfg(test)]
@@ -386,6 +418,30 @@ mod tests {
     let (id, metric) = parse_native_line("run_123,45.52").unwrap();
     assert_eq!(id, "run_123");
     assert_eq!(metric, serde_json::Number::from_f64(45.52).unwrap());
+  }
+
+  #[test]
+  fn test_extract_gen_meta() {
+    // Valid JSON
+    let json_str = r#"{"size": 100}"#;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(json_str);
+    let id = format!("meta:{}", encoded);
+    let meta = extract_gen_meta(&id).unwrap();
+    assert_eq!(meta.unwrap()["size"], 100);
+
+    // Plain string
+    let meta = extract_gen_meta("run_1").unwrap();
+    assert!(meta.is_none());
+
+    // Invalid Base64
+    let meta = extract_gen_meta("meta:!@#$").unwrap();
+    assert!(meta.is_none());
+
+    // Invalid JSON
+    let encoded = base64::engine::general_purpose::STANDARD.encode("not_json");
+    let id = format!("meta:{}", encoded);
+    let res = extract_gen_meta(&id);
+    assert!(matches!(res, Err(BenchmarkError::MalformedJSON { .. })));
   }
 
   #[test]

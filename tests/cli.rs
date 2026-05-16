@@ -157,10 +157,10 @@ fn test_build_and_run_e2e() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","metric":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_token":"test_case_1","metric":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","metric":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_token":"test_case_1","metric":12}"#)
     );
 }
 
@@ -242,10 +242,10 @@ fn test_build_and_run_e2e_stdin_config() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","metric":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_token":"test_case_1","metric":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","metric":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_token":"test_case_1","metric":12}"#)
     );
 }
 
@@ -412,4 +412,58 @@ fn test_reps_and_attributes_e2e() {
     .success()
     .stdout(predicate::str::contains(r#""rep_index":0"#))
     .stdout(predicate::str::contains(r#""rep_index":1"#));
+}
+
+#[test]
+fn test_run_with_meta_data_token() {
+  let temp = tempdir().unwrap();
+  let components_dir = temp.path().join("components");
+  fs::create_dir_all(&components_dir).unwrap();
+
+  let options = CopyOptions::new();
+  copy("tests/fixtures", temp.path(), &options).unwrap();
+  fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
+
+  // Build
+  let mut build_cmd = Command::new(cargo::cargo_bin!("impa"));
+  build_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("manifest.json")
+    .env("NO_COLOR", "1");
+  build_cmd.assert().success();
+
+  // Run
+  let config_str = r#"{
+    "tasks": [
+      {"executor": "meta-exec", "args": []}
+    ]
+  }"#;
+
+  let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
+  run_cmd
+    .arg("run")
+    .arg("--set")
+    .arg("generator.name=meta-gen")
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("manifest.json")
+    .arg("--config")
+    .arg("-")
+    .env("NO_COLOR", "1")
+    .write_stdin(config_str);
+
+  run_cmd
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(r#""data_token":"meta:"#))
+    .stdout(predicate::str::contains(
+      r#""gen_meta":{"label":"test","size":100}"#,
+    ))
+    .stdout(predicate::str::contains(r#""metric":42"#));
 }

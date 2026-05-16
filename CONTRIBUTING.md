@@ -56,15 +56,15 @@ For the `impa` orchestrator to work, your component must respect its interface:
       * Accept a `--seed=<u64>` argument.
       * Accept any passthrough arguments (e.g., `--size=1000`).
       * Print test cases to `stdout`, one per line.
-      * Each line MUST start with a unique `data_id` (e.g., `test_1,...`).
+      * Each line MUST start with a unique `data_token` (e.g., `test_1,...`).
 
   * **Executors** MUST:
 
       * Accept any task-specific arguments passed via the `args` array in the JSON configuration.
       * Read test cases line-by-line from `stdin`.
-      * For each line, parse the `data_id` from the generator.
+      * For each line, parse the `data_token` from the generator.
       * Run the benchmark for the specified target and print the result to `stdout`.
-      * The output format MUST be `data_id,metric\n`.
+      * The output format MUST be `data_token,metric\n`.
 
 ## Development Setup
 

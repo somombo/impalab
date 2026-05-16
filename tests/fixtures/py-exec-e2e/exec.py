@@ -55,13 +55,13 @@ def main():
             print(f'Error: Line is malformed. Cannot parse: `{line}`', file=sys.stderr)
             sys.exit(1)
 
-        test_data_id = parts[0]
+        test_data_token = parts[0]
         input_data = parts[1:]
-        print(f'Info: Received generated data: `{(test_data_id, input_data)}`', file=sys.stderr)
+        print(f'Info: Received generated data: `{(test_data_token, input_data)}`', file=sys.stderr)
         
         example_metric = run(target, input_data, **kwargs)
 
-        print(f"{test_data_id},{example_metric}")
+        print(f"{test_data_token},{example_metric}")
 
 if __name__ == '__main__':
     main()
