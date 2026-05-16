@@ -399,3 +399,56 @@ fn test_reps_and_labels_e2e() {
     .stdout(predicate::str::contains(r#""rep_index":0"#))
     .stdout(predicate::str::contains(r#""rep_index":1"#));
 }
+
+#[test]
+fn test_run_with_meta_data_id() {
+  let temp = tempdir().unwrap();
+  let components_dir = temp.path().join("components");
+  fs::create_dir_all(&components_dir).unwrap();
+
+  let options = CopyOptions::new();
+  copy("tests/fixtures", temp.path(), &options).unwrap();
+  fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
+
+  // Build
+  let mut build_cmd = Command::new(cargo::cargo_bin!("impa"));
+  build_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("manifest.json")
+    .env("NO_COLOR", "1");
+  build_cmd.assert().success();
+
+  // Run
+  let config_str = r#"{
+    "tasks": [
+      {"executor": "meta-exec", "args": []}
+    ]
+  }"#;
+
+  let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
+  run_cmd
+    .arg("run")
+    .arg("--set")
+    .arg("generator.name=meta-gen")
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("manifest.json")
+    .arg("--config")
+    .arg("-")
+    .env("NO_COLOR", "1")
+    .write_stdin(config_str);
+
+  run_cmd
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(
+      r#""data_id":{"label":"test","size":100}"#,
+    ))
+    .stdout(predicate::str::contains(r#""duration":42"#));
+}

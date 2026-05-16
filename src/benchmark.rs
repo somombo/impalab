@@ -16,6 +16,7 @@ use crate::config::ResolvedTask;
 use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
+use base64::Engine;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -278,6 +279,28 @@ async fn run_pipeline(
   Ok(())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum GenMeta {
+  MetaData(serde_json::Value),
+  DataId(String),
+}
+
+impl GenMeta {
+  pub fn parse(id: &str) -> Self {
+    if let Some(encoded) = id.strip_prefix("meta:") {
+      let result = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()
+        .and_then(|decoded| serde_json::from_slice(&decoded).ok());
+      if let Some(json) = result {
+        return GenMeta::MetaData(json);
+      }
+    }
+    GenMeta::DataId(id.to_string())
+  }
+}
+
 /// Reads lines from the executor's stdout, parses them, and prints them as JSON.
 async fn process_executor_stdout<R: AsyncRead + Unpin>(
   stream: R,
@@ -288,7 +311,9 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
   struct BenchmarkResult<'a> {
     #[serde(flatten)]
     meta: &'a BenchmarkMeta,
-    data_id: String,
+
+    #[serde(rename = "data_id")]
+    gen_meta: GenMeta,
     duration: u64,
   }
 
@@ -306,7 +331,7 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
       Ok((data_id, duration)) => {
         let result = BenchmarkResult {
           meta,
-          data_id,
+          gen_meta: GenMeta::parse(&data_id),
           duration,
         };
         let json_result =
@@ -378,6 +403,47 @@ mod tests {
     let (id, dur) = parse_native_line("run_123,45000").unwrap();
     assert_eq!(id, "run_123");
     assert_eq!(dur, 45000);
+  }
+
+  #[test]
+  fn test_meta_id_parsing() {
+    use base64::Engine;
+    // Valid JSON
+    let json_str = r#"{"size": 100}"#;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(json_str);
+    let id = format!("meta:{}", encoded);
+    let meta = GenMeta::parse(&id);
+    if let GenMeta::MetaData(val) = meta {
+      assert_eq!(val["size"], 100);
+    } else {
+      panic!("Expected MetaId::Json, got {:?}", meta);
+    }
+
+    // Plain string
+    let meta = GenMeta::parse("run_1");
+    if let GenMeta::DataId(s) = meta {
+      assert_eq!(s, "run_1");
+    } else {
+      panic!("Expected MetaId::String, got {:?}", meta);
+    }
+
+    // Invalid Base64
+    let meta = GenMeta::parse("meta:!@#$");
+    if let GenMeta::DataId(s) = meta {
+      assert_eq!(s, "meta:!@#$");
+    } else {
+      panic!("Expected MetaId::String, got {:?}", meta);
+    }
+
+    // Invalid JSON
+    let encoded = base64::engine::general_purpose::STANDARD.encode("not_json");
+    let id = format!("meta:{}", encoded);
+    let meta = GenMeta::parse(&id);
+    if let GenMeta::DataId(s) = meta {
+      assert_eq!(s, id);
+    } else {
+      panic!("Expected MetaId::String, got {:?}", meta);
+    }
   }
 
   #[test]

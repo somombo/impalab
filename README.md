@@ -108,6 +108,31 @@ In this convention, each line is a test case.
 - `8` is the "needle" to search for.
 - `10`, `5`, `3`, `8`, `1` is the "haystack" to search in.
 
+### Advanced Metadata (data_id)
+
+While `data_id` is typically a simple string (e.g., `run_1`), Impalab supports embedding structured metadata directly into the `data_id`. If a `data_id` starts with the `meta:` prefix, the remaining part is expected to be a **Base64-encoded JSON string**.
+
+When `impa` encounters such a `data_id`, it will:
+1. Strip the `meta:` prefix.
+2. Base64-decode the content.
+3. Parse it as JSON.
+4. Replace the `data_id` string in the final output with the resulting JSON object.
+
+**Example Generator Output:**
+```text
+meta:eyJzaXplIjogMTAwfSwxLDIsMyw0
+```
+*(Where `eyJzaXplIjogMTAwfS` is `{"size": 100}` in Base64)*
+
+**Final JSONL Output:**
+```json
+{"task_index":0,...,"data_id":{"size": 100},"duration":42}
+```
+
+> [!WARNING]
+> **Keep Metadata Small**
+> To avoid skewing performance metrics due to excessive I/O overhead between the generator and executor, it is strongly recommended to keep the JSON payload small (e.g., < 1KB).
+
 ### Executor Executable
 
 - **Must** accept any task-specific arguments passed via the `args` array in the JSON configuration.
