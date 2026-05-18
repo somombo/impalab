@@ -157,10 +157,10 @@ fn test_build_and_run_e2e() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"attributes":{},"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"attributes":{},"data_id":"test_case_1","duration":12}"#)
     );
 }
 
@@ -242,10 +242,10 @@ fn test_build_and_run_e2e_stdin_config() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"attributes":{},"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"labels":{},"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"attributes":{},"data_id":"test_case_1","duration":12}"#)
     );
 }
 
@@ -307,7 +307,7 @@ fn test_build_with_filters() {
 }
 
 #[test]
-fn test_reps_and_labels_e2e() {
+fn test_reps_and_attributes_e2e() {
   // Setup: Create temp dir and copy fixtures
   let temp = tempdir().unwrap();
   let components_dir = temp.path().join("components");
@@ -336,9 +336,9 @@ fn test_reps_and_labels_e2e() {
   // --- Test `impa run` ---
   let config_str = r#"{
     "reps": 2,
-    "labels": {"global": "foo"},
+    "attributes": {"global": "foo", "threads": 8},
     "tasks": [
-      {"executor": "python-e2e", "args": ["test_func_1"], "reps": 1, "labels": {"task": "bar"}}
+      {"executor": "python-e2e", "args": ["test_func_1"], "reps": 1, "attributes": {"task": "bar", "simd": true}}
     ]
   }"#;
 
@@ -360,13 +360,15 @@ fn test_reps_and_labels_e2e() {
 
   // Assert run success and check the JSONL output
   // Task has reps: 1, so it should only run once (rep_index: 0)
-  // Labels should be merged: {"global": "foo", "task": "bar"}
+  // Attributes should be merged: {"global": "foo", "threads": 8, "task": "bar", "simd": true}
   run_cmd
     .assert()
     .success()
     .stdout(predicate::str::contains(r#""rep_index":0"#))
     .stdout(predicate::str::contains(r#""global":"foo""#))
+    .stdout(predicate::str::contains(r#""threads":8"#))
     .stdout(predicate::str::contains(r#""task":"bar""#))
+    .stdout(predicate::str::contains(r#""simd":true"#))
     .stdout(predicate::str::contains(r#""rep_index":1"#).not());
 
   // Test with global reps

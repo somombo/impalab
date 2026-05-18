@@ -196,14 +196,15 @@ Create a `plan.json` file specifying the generator and the tasks:
     "args": ["--size", "10000"]
   },
   "reps": 5,
-  "labels": {
+  "attributes": {
     "environment": "production",
+    "threads": 8,
     "cpu": "x86_64"
   },
   "tasks": [
-    {"executor": "zig-executors", "args": ["linear_search"], "labels": {"tier": "high"}},
+    {"executor": "zig-executors", "args": ["linear_search"], "attributes": {"tier": "high", "simd": true}},
     {"executor": "zig-executors", "args": ["binary_search"], "reps": 10},
-    {"executor": "python-executors", "args": ["linear_search_py"], "labels": {"cpu": "arm64"}}
+    {"executor": "python-executors", "args": ["linear_search_py"], "attributes": {"cpu": "arm64"}}
   ]
 }
 ```
@@ -224,9 +225,11 @@ The `reps` field allows you to execute each task multiple times to gather more s
 > **Generator Determinism - The Trust Contract**
 > The integrity of the `reps` feature relies entirely on the generator component producing the **exact same data stream** every time it receives the same `--seed`. If a generator ignores the seed and produces random data (e.g., using `random.random()` without seeding), each repetition will benchmark a different dataset, making the results incomparable. Component authors MUST ensure their generators honor the `--seed` contract.
 
-#### Configuration Labels
+#### Configuration Attributes
 
-You can attach arbitrary metadata to your benchmark results using `labels`. Labels can be defined at the global level (applying to all tasks) or within individual tasks. Task-level labels will be merged with global labels, and can overwrite them if the keys match. In the example above, the `python-executors` task overrides the global `"cpu"` label with `"arm64"`.
+You can attach arbitrary metadata to your benchmark results using `attributes`. Attributes can be defined at the global level (applying to all tasks) or within individual tasks. Task-level attributes will be merged with global attributes, and can overwrite them if the keys match. In the example above, the `python-executors` task overrides the global `"cpu"` attribute with `"arm64"`.
+
+Unlike standard attributes which are often restricted to strings, Impalab attributes support mixed JSON primitive types (strings, integers, booleans). This allows you to pass structured configuration directly through to your analysis tools without manual type casting.
 
 ### Running "Self-Contained" Executors
 
@@ -241,15 +244,15 @@ By omitting the generator, the executor's `stdin` is automatically connected to 
 
 ## Benchmark Output & Analysis
 
-`impa` captures the `data_id,duration` CSV output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, and any resolved `labels`, providing full traceability.
+`impa` captures the `data_id,duration` CSV output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, and any resolved `attributes`, providing full traceability.
 
 ```json
-{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"labels":{"environment":"production","cpu":"x86_64","tier":"high"},"data_id":"run_1","duration":450}
-{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"labels":{"environment":"production","cpu":"x86_64"},"data_id":"run_1","duration":30}
-{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"labels":{"environment":"production","cpu":"arm64"},"data_id":"run_1","duration":52000}
+{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_id":"run_1","duration":450}
+{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_id":"run_1","duration":30}
+{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_id":"run_1","duration":52000}
 ```
 
-This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment. For example, you can easily load the output into a **Jupyter notebook**, parse each line, and build a `pandas.DataFrame` for sophisticated analysis and visualization.
+This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment. For example, you can easily load the output into a **Jupyter notebook**, parse each line, and build a `pandas.DataFrame` for sophisticated analysis and visualization. Since attributes retain their primitive types, tools like pandas will automatically infer the correct numeric or boolean types for your columns.
 
 ## Command-Line Reference
 

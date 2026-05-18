@@ -37,7 +37,7 @@ struct BenchmarkMeta {
   task_args: Vec<String>,
 
   rep_index: usize,
-  labels: HashMap<String, String>,
+  attributes: HashMap<String, serde_json::Value>,
 }
 
 /// Main benchmark runner.
@@ -132,7 +132,7 @@ async fn run_pipeline(
       executor: executor_name,
       args: task_args,
       command_args,
-      effective_labels,
+      effective_attributes,
       effective_reps: _,
     },
   ): (usize, &ResolvedTask),
@@ -225,7 +225,7 @@ async fn run_pipeline(
     executor: executor_name.clone(),
     task_args: task_args.clone(),
     rep_index,
-    labels: effective_labels.clone(),
+    attributes: effective_attributes.clone(),
   };
   let stdout_task = tokio::spawn(
     async move { process_executor_stdout(exec_stdout, &meta).await }

@@ -15,6 +15,8 @@ impl<'a> figment::Provider for SingleOverride<'a> {
   ) -> Result<figment::value::Map<figment::Profile, figment::value::Dict>, figment::Error> {
     let val = if let Ok(num) = self.value.parse::<u64>() {
       figment::value::Value::from(num)
+    } else if let Ok(num) = self.value.parse::<f64>() {
+      figment::value::Value::from(num)
     } else if let Ok(b) = self.value.parse::<bool>() {
       figment::value::Value::from(b)
     } else {

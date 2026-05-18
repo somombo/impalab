@@ -143,6 +143,11 @@ pub enum ConfigError {
     available: Vec<String>,
   },
 
+  #[error(
+    "Attribute '{key}' must be a primitive (number, string, boolean, or null). Found: {value}"
+  )]
+  InvalidAttribute { key: String, value: String },
+
   #[error("Component resolution graph validation failed: {0:?}")]
   GraphValidationFailed(Vec<ConfigError>),
 }

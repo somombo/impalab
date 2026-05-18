@@ -34,7 +34,7 @@ struct RawConfig {
   components: HashMap<String, ManifestComponent>,
   reps: Option<usize>,
   #[serde(default)]
-  labels: HashMap<String, String>,
+  attributes: HashMap<String, serde_json::Value>,
 }
 
 impl RawConfig {
@@ -80,6 +80,20 @@ impl RawConfig {
   fn resolve_all(&self, root_dir: &std::path::Path) -> Result<ResolvedConfig, ConfigError> {
     let mut errors = Vec::new();
 
+    let validate_attributes = |attrs: &HashMap<String, serde_json::Value>,
+                               errors: &mut Vec<ConfigError>| {
+      for (k, v) in attrs {
+        if !v.is_number() && !v.is_string() && !v.is_boolean() && !v.is_null() {
+          errors.push(ConfigError::InvalidAttribute {
+            key: k.clone(),
+            value: v.to_string(),
+          });
+        }
+      }
+    };
+
+    validate_attributes(&self.attributes, &mut errors);
+
     let mut resolved_generator = None;
     if let Some(generator_cfg) = self.generator.as_ref() {
       match self.resolve_component(&generator_cfg.name, ComponentType::Generator, root_dir) {
@@ -111,8 +125,10 @@ impl RawConfig {
               continue;
             }
 
-            let mut effective_labels = self.labels.clone();
-            effective_labels.extend(task.labels.clone());
+            let mut effective_attributes = self.attributes.clone();
+            effective_attributes.extend(task.attributes.clone());
+
+            validate_attributes(&task.attributes, &mut errors);
 
             resolved_tasks.push(ResolvedTask {
               executor: task.executor_name.clone(),
@@ -120,7 +136,7 @@ impl RawConfig {
               command_args: cmp.run,
 
               effective_reps,
-              effective_labels,
+              effective_attributes,
             });
           }
           Err(e) => errors.push(e),
@@ -149,7 +165,7 @@ pub struct Task {
 
   pub reps: Option<usize>,
   #[serde(default)]
-  pub labels: HashMap<String, String>,
+  pub attributes: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +174,7 @@ pub struct ResolvedTask {
   pub args: Vec<String>,
   pub command_args: CommandArgs,
   pub effective_reps: usize,
-  pub effective_labels: HashMap<String, String>,
+  pub effective_attributes: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -475,7 +491,7 @@ mod tests {
         executor_name: "my-exec".to_string(),
         args: vec!["run-this".to_string()],
         reps: None,
-        labels: HashMap::new(),
+        attributes: HashMap::new(),
       }]),
       components: {
         let mut map = HashMap::new();
@@ -523,7 +539,7 @@ mod tests {
         executor_name: "missing-exec".to_string(),
         args: vec![],
         reps: None,
-        labels: HashMap::new(),
+        attributes: HashMap::new(),
       }]),
       components: HashMap::new(),
       ..Default::default()
@@ -559,7 +575,7 @@ mod tests {
         executor_name: "not-an-executor".to_string(),
         args: vec![],
         reps: None,
-        labels: HashMap::new(),
+        attributes: HashMap::new(),
       }]),
       components,
       ..Default::default()
@@ -599,7 +615,7 @@ mod tests {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: Some(10),
-        labels: HashMap::new(),
+        attributes: HashMap::new(),
       }]),
       components: components.clone(),
       ..Default::default()
@@ -614,7 +630,7 @@ mod tests {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: None,
-        labels: HashMap::new(),
+        attributes: HashMap::new(),
       }]),
       components: components.clone(),
       ..Default::default()
@@ -629,7 +645,7 @@ mod tests {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: None,
-        labels: HashMap::new(),
+        attributes: HashMap::new(),
       }]),
       components: components.clone(),
       ..Default::default()
@@ -639,7 +655,7 @@ mod tests {
   }
 
   #[test]
-  fn test_raw_config_resolve_labels_merge() {
+  fn test_raw_config_resolve_attributes_merge() {
     let mut components = HashMap::new();
     components.insert(
       "exec".to_string(),
@@ -653,37 +669,41 @@ mod tests {
       },
     );
 
-    let mut global_labels = HashMap::new();
-    global_labels.insert("env".to_string(), "prod".to_string());
-    global_labels.insert("shared".to_string(), "base".to_string());
+    let mut global_attributes = HashMap::new();
+    global_attributes.insert("env".to_string(), json!("prod"));
+    global_attributes.insert("shared".to_string(), json!("base"));
+    global_attributes.insert("threads".to_string(), json!(4));
 
-    let mut task_labels = HashMap::new();
-    task_labels.insert("shared".to_string(), "override".to_string());
-    task_labels.insert("task-only".to_string(), "value".to_string());
+    let mut task_attributes = HashMap::new();
+    task_attributes.insert("shared".to_string(), json!("override"));
+    task_attributes.insert("task-only".to_string(), json!("value"));
+    task_attributes.insert("simd".to_string(), json!(true));
 
     let raw = RawConfig {
-      labels: global_labels,
+      attributes: global_attributes,
       tasks: Some(vec![Task {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: None,
-        labels: task_labels,
+        attributes: task_attributes,
       }]),
       components,
       ..Default::default()
     };
 
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
-    let labels = &resolved.tasks[0].effective_labels;
+    let attributes = &resolved.tasks[0].effective_attributes;
 
-    assert_eq!(labels.get("env").unwrap(), "prod");
-    assert_eq!(labels.get("shared").unwrap(), "override");
-    assert_eq!(labels.get("task-only").unwrap(), "value");
-    assert_eq!(labels.len(), 3);
+    assert_eq!(attributes.get("env").unwrap(), &json!("prod"));
+    assert_eq!(attributes.get("shared").unwrap(), &json!("override"));
+    assert_eq!(attributes.get("task-only").unwrap(), &json!("value"));
+    assert_eq!(attributes.get("threads").unwrap(), &json!(4));
+    assert_eq!(attributes.get("simd").unwrap(), &json!(true));
+    assert_eq!(attributes.len(), 5);
   }
 
   #[test]
-  fn test_resolve_reps_and_labels() {
+  fn test_resolve_reps_and_attributes() {
     let mut components = HashMap::new();
     components.insert(
       "my-exec".to_string(),
@@ -697,30 +717,30 @@ mod tests {
       },
     );
 
-    let mut global_labels = HashMap::new();
-    global_labels.insert("env".to_string(), "prod".to_string());
-    global_labels.insert("version".to_string(), "1.0".to_string());
+    let mut global_attributes = HashMap::new();
+    global_attributes.insert("env".to_string(), json!("prod"));
+    global_attributes.insert("version".to_string(), json!("1.0"));
 
-    let mut task_labels = HashMap::new();
-    task_labels.insert("version".to_string(), "2.0".to_string());
-    task_labels.insert("tier".to_string(), "high".to_string());
+    let mut task_attributes = HashMap::new();
+    task_attributes.insert("version".to_string(), json!("2.0"));
+    task_attributes.insert("tier".to_string(), json!("high"));
 
     let raw = RawConfig {
       generator: None,
       reps: Some(5),
-      labels: global_labels,
+      attributes: global_attributes,
       tasks: Some(vec![
         Task {
           executor_name: "my-exec".to_string(),
           args: vec![],
           reps: None,
-          labels: Default::default(),
+          attributes: Default::default(),
         },
         Task {
           executor_name: "my-exec".to_string(),
           args: vec![],
           reps: Some(10),
-          labels: task_labels,
+          attributes: task_attributes,
         },
       ]),
       components,
@@ -728,32 +748,75 @@ mod tests {
 
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
 
-    // Task 0 inherits global reps and labels
+    // Task 0 inherits global reps and attributes
     assert_eq!(resolved.tasks[0].effective_reps, 5);
     assert_eq!(
-      resolved.tasks[0].effective_labels.get("env").unwrap(),
-      "prod"
+      resolved.tasks[0].effective_attributes.get("env").unwrap(),
+      &json!("prod")
     );
     assert_eq!(
-      resolved.tasks[0].effective_labels.get("version").unwrap(),
-      "1.0"
+      resolved.tasks[0]
+        .effective_attributes
+        .get("version")
+        .unwrap(),
+      &json!("1.0")
     );
-    assert_eq!(resolved.tasks[0].effective_labels.len(), 2);
+    assert_eq!(resolved.tasks[0].effective_attributes.len(), 2);
 
-    // Task 1 overrides global reps and merges/overwrites labels
+    // Task 1 overrides global reps and merges/overwrites attributes
     assert_eq!(resolved.tasks[1].effective_reps, 10);
     assert_eq!(
-      resolved.tasks[1].effective_labels.get("env").unwrap(),
-      "prod"
+      resolved.tasks[1].effective_attributes.get("env").unwrap(),
+      &json!("prod")
     );
     assert_eq!(
-      resolved.tasks[1].effective_labels.get("version").unwrap(),
-      "2.0"
+      resolved.tasks[1]
+        .effective_attributes
+        .get("version")
+        .unwrap(),
+      &json!("2.0")
     );
     assert_eq!(
-      resolved.tasks[1].effective_labels.get("tier").unwrap(),
-      "high"
+      resolved.tasks[1].effective_attributes.get("tier").unwrap(),
+      &json!("high")
     );
-    assert_eq!(resolved.tasks[1].effective_labels.len(), 3);
+    assert_eq!(resolved.tasks[1].effective_attributes.len(), 3);
+  }
+
+  #[test]
+  fn test_single_override_parsing() {
+    let mut overrides = HashMap::new();
+    overrides.insert("attributes.threshold".to_string(), "0.95".to_string());
+    overrides.insert("attributes.count".to_string(), "42".to_string());
+    overrides.insert("attributes.debug".to_string(), "true".to_string());
+    overrides.insert("attributes.label".to_string(), "foo".to_string());
+
+    let config = RawConfig::build(ConfigSource::String("{}".to_string()), None, overrides).unwrap();
+
+    let attrs = config.attributes;
+    assert_eq!(attrs.get("threshold").unwrap(), &json!(0.95));
+    assert_eq!(attrs.get("count").unwrap(), &json!(42));
+    assert_eq!(attrs.get("debug").unwrap(), &json!(true));
+    assert_eq!(attrs.get("label").unwrap(), &json!("foo"));
+  }
+
+  #[test]
+  fn test_raw_config_resolve_all_invalid_attribute() {
+    let mut attributes = HashMap::new();
+    attributes.insert("nested".to_string(), json!({ "a": 1 }));
+
+    let raw = RawConfig {
+      attributes,
+      components: HashMap::new(),
+      ..Default::default()
+    };
+
+    let res = raw.resolve_all(std::path::Path::new("."));
+    match res {
+      Err(ConfigError::GraphValidationFailed(errs)) => {
+        assert!(matches!(errs[0], ConfigError::InvalidAttribute { .. }));
+      }
+      _ => panic!("Expected GraphValidationFailed with InvalidAttribute"),
+    }
   }
 }
