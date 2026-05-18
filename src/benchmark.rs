@@ -279,25 +279,14 @@ async fn run_pipeline(
   Ok(())
 }
 
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum GenMeta {
-  MetaData(serde_json::Value),
-  DataId(String),
-}
-
-impl GenMeta {
-  pub fn parse(id: &str) -> Self {
-    if let Some(encoded) = id.strip_prefix("meta:") {
-      let result = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .ok()
-        .and_then(|decoded| serde_json::from_slice(&decoded).ok());
-      if let Some(json) = result {
-        return GenMeta::MetaData(json);
-      }
-    }
-    GenMeta::DataId(id.to_string())
+fn extract_gen_meta(token: &str) -> Option<serde_json::Value> {
+  if let Some(encoded) = token.strip_prefix("meta:") {
+    base64::engine::general_purpose::STANDARD
+      .decode(encoded)
+      .ok()
+      .and_then(|decoded| serde_json::from_slice(&decoded).ok())
+  } else {
+    None
   }
 }
 
@@ -312,8 +301,11 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     #[serde(flatten)]
     meta: &'a BenchmarkMeta,
 
-    #[serde(rename = "data_id")]
-    gen_meta: GenMeta,
+    data_token: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gen_meta: Option<serde_json::Value>,
+
     duration: u64,
   }
 
@@ -328,10 +320,11 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     }
 
     match parse_native_line(&line) {
-      Ok((data_id, duration)) => {
+      Ok((data_token, duration)) => {
         let result = BenchmarkResult {
           meta,
-          gen_meta: GenMeta::parse(&data_id),
+          gen_meta: extract_gen_meta(&data_token),
+          data_token,
           duration,
         };
         let json_result =
@@ -372,7 +365,7 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   Ok(())
 }
 
-/// Parses a single line of `data_id,duration` CSV.
+/// Parses a single line of `data_token,duration` CSV.
 fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
   let parts: Vec<&str> = line.split(',').collect();
 
@@ -383,7 +376,7 @@ fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
     });
   }
 
-  let data_id = parts[0].to_string();
+  let data_token = parts[0].to_string();
   let duration = parts[1]
     .parse::<u64>()
     .map_err(|e| BenchmarkError::ParseDuration {
@@ -391,7 +384,7 @@ fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
       source: e,
     })?;
 
-  Ok((data_id, duration))
+  Ok((data_token, duration))
 }
 
 #[cfg(test)]
@@ -406,44 +399,27 @@ mod tests {
   }
 
   #[test]
-  fn test_meta_id_parsing() {
-    use base64::Engine;
+  fn test_extract_gen_meta() {
     // Valid JSON
     let json_str = r#"{"size": 100}"#;
     let encoded = base64::engine::general_purpose::STANDARD.encode(json_str);
     let id = format!("meta:{}", encoded);
-    let meta = GenMeta::parse(&id);
-    if let GenMeta::MetaData(val) = meta {
-      assert_eq!(val["size"], 100);
-    } else {
-      panic!("Expected MetaId::Json, got {:?}", meta);
-    }
+    let meta = extract_gen_meta(&id);
+    assert_eq!(meta.unwrap()["size"], 100);
 
     // Plain string
-    let meta = GenMeta::parse("run_1");
-    if let GenMeta::DataId(s) = meta {
-      assert_eq!(s, "run_1");
-    } else {
-      panic!("Expected MetaId::String, got {:?}", meta);
-    }
+    let meta = extract_gen_meta("run_1");
+    assert!(meta.is_none());
 
     // Invalid Base64
-    let meta = GenMeta::parse("meta:!@#$");
-    if let GenMeta::DataId(s) = meta {
-      assert_eq!(s, "meta:!@#$");
-    } else {
-      panic!("Expected MetaId::String, got {:?}", meta);
-    }
+    let meta = extract_gen_meta("meta:!@#$");
+    assert!(meta.is_none());
 
     // Invalid JSON
     let encoded = base64::engine::general_purpose::STANDARD.encode("not_json");
     let id = format!("meta:{}", encoded);
-    let meta = GenMeta::parse(&id);
-    if let GenMeta::DataId(s) = meta {
-      assert_eq!(s, id);
-    } else {
-      panic!("Expected MetaId::String, got {:?}", meta);
-    }
+    let meta = extract_gen_meta(&id);
+    assert!(meta.is_none());
   }
 
   #[test]
