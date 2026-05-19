@@ -59,9 +59,9 @@ def main():
         input_data = parts[1:]
         print(f'Info: Received generated data: `{(test_data_id, input_data)}`', file=sys.stderr)
         
-        example_duration = run(target, input_data, **kwargs)
+        example_metric = run(target, input_data, **kwargs)
 
-        print(f"{test_data_id},{example_duration}")
+        print(f"{test_data_id},{example_metric}")
 
 if __name__ == '__main__':
     main()

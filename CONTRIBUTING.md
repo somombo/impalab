@@ -64,7 +64,7 @@ For the `impa` orchestrator to work, your component must respect its interface:
       * Read test cases line-by-line from `stdin`.
       * For each line, parse the `data_id` from the generator.
       * Run the benchmark for the specified target and print the result to `stdout`.
-      * The output format MUST be `data_id,duration_nanos\n`.
+      * The output format MUST be `data_id,metric\n`.
 
 ## Development Setup
 

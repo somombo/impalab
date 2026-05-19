@@ -157,10 +157,10 @@ fn test_build_and_run_e2e() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","metric":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","metric":12}"#)
     );
 }
 
@@ -242,10 +242,10 @@ fn test_build_and_run_e2e_stdin_config() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","metric":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","metric":12}"#)
     );
 }
 
