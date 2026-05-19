@@ -126,7 +126,7 @@ meta:eyJzaXplIjogMTAwfSwxLDIsMyw0
 
 **Final JSONL Output:**
 ```json
-{"task_index":0,...,"data_token":"meta:eyJzaXplIjogMTAwfS","gen_meta":{"size": 100},"duration":42}
+{"task_index":0,...,"data_token":"meta:eyJzaXplIjogMTAwfS","gen_meta":{"size": 100},"metric":42}
 ```
 
 > [!WARNING]
@@ -138,8 +138,12 @@ meta:eyJzaXplIjogMTAwfSwxLDIsMyw0
 - **Must** accept any task-specific arguments passed via the `args` array in the JSON configuration.
 - **Must** read test cases line-by-line from `stdin`.
 - **Must** understand the data format from the generator (e.g., parse the **data_token**, "needle", and "haystack" from each line).
-- **Must** print results to `stdout` in a simple CSV format: `data_token,duration_nanos`. The `data_token` _must_ match the one received from the generator.
+- **Must** print results to `stdout` in a simple CSV format: `data_token,metric`. The `data_token` _must_ match the one received from the generator.
 - `stderr` will be captured and forwarded by `impa` for logging.
+
+> [!NOTE]
+> **What is a Metric?**
+> A `metric` can be any valid JSON number (integer or float). While frequently used for execution time (nanoseconds), it can also represent memory usage (bytes), accuracy (0.0 - 1.0), cost, or any other numeric outcome of your task.
 
 **Example Output (from the Zig executor):**
 (This output corresponds to the generator input above for the task with `"args": ["linear_search"]`)
@@ -244,12 +248,12 @@ By omitting the generator, the executor's `stdin` is automatically connected to 
 
 ## Benchmark Output & Analysis
 
-`impa` captures the `data_token,duration` CSV output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, and any resolved `attributes`, providing full traceability.
+`impa` captures the `data_token,metric` CSV output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, and any resolved `attributes`, providing full traceability.
 
 ```json
-{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"run_1","duration":450}
-{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_token":"run_1","duration":30}
-{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"run_1","duration":52000}
+{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"run_1","metric":450}
+{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_token":"run_1","metric":30}
+{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"run_1","metric":52000}
 ```
 
 This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment. For example, you can easily load the output into a **Jupyter notebook**, parse each line, and build a `pandas.DataFrame` for sophisticated analysis and visualization. Since attributes retain their primitive types, tools like pandas will automatically infer the correct numeric or boolean types for your columns.

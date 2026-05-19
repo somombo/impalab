@@ -306,7 +306,7 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     #[serde(skip_serializing_if = "Option::is_none")]
     gen_meta: Option<serde_json::Value>,
 
-    duration: u64,
+    metric: serde_json::Number,
   }
 
   let mut reader = BufReader::new(stream).lines();
@@ -320,12 +320,12 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     }
 
     match parse_native_line(&line) {
-      Ok((data_token, duration)) => {
+      Ok((data_token, metric)) => {
         let result = BenchmarkResult {
           meta,
           gen_meta: extract_gen_meta(&data_token),
           data_token,
-          duration,
+          metric,
         };
         let json_result =
           serde_json::to_string(&result).map_err(BenchmarkError::SerializeResult)?;
@@ -365,8 +365,8 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   Ok(())
 }
 
-/// Parses a single line of `data_token,duration` CSV.
-fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
+/// Parses a single line of `data_token,metric` CSV.
+fn parse_native_line(line: &str) -> Result<(String, serde_json::Number), BenchmarkError> {
   let parts: Vec<&str> = line.split(',').collect();
 
   if parts.len() != 2 {
@@ -377,14 +377,14 @@ fn parse_native_line(line: &str) -> Result<(String, u64), BenchmarkError> {
   }
 
   let data_token = parts[0].to_string();
-  let duration = parts[1]
-    .parse::<u64>()
-    .map_err(|e| BenchmarkError::ParseDuration {
-      duration: parts[1].to_string(),
+  let metric = serde_json::from_str::<serde_json::Number>(parts[1]).map_err(|e| {
+    BenchmarkError::ParseMetric {
+      metric: parts[1].to_string(),
       source: e,
-    })?;
+    }
+  })?;
 
-  Ok((data_token, duration))
+  Ok((data_token, metric))
 }
 
 #[cfg(test)]
@@ -393,9 +393,16 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_valid() {
-    let (id, dur) = parse_native_line("run_123,45000").unwrap();
+    let (id, metric) = parse_native_line("run_123,45000").unwrap();
     assert_eq!(id, "run_123");
-    assert_eq!(dur, 45000);
+    assert_eq!(metric, serde_json::Number::from(45000));
+  }
+
+  #[test]
+  fn test_parse_native_line_valid_float() {
+    let (id, metric) = parse_native_line("run_123,45.52").unwrap();
+    assert_eq!(id, "run_123");
+    assert_eq!(metric, serde_json::Number::from_f64(45.52).unwrap());
   }
 
   #[test]
@@ -441,8 +448,8 @@ mod tests {
   }
 
   #[test]
-  fn test_parse_native_line_malformed_invalid_duration() {
+  fn test_parse_native_line_malformed_invalid_metric() {
     let res = parse_native_line("run_123,fast");
-    assert!(matches!(res, Err(BenchmarkError::ParseDuration { .. })));
+    assert!(matches!(res, Err(BenchmarkError::ParseMetric { .. })));
   }
 }

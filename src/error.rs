@@ -210,11 +210,11 @@ pub enum BenchmarkError {
   #[error("Expected 3 CSV parts, got {parts} for line: {line}")]
   CsvParts { parts: usize, line: String },
 
-  #[error("Failed to parse duration '{duration}'")]
-  ParseDuration {
-    duration: String,
+  #[error("Failed to parse metric '{metric}'")]
+  ParseMetric {
+    metric: String,
     #[source]
-    source: std::num::ParseIntError,
+    source: serde_json::Error,
   },
 
   #[error("Failed to read {component_type:?} stderr")]
