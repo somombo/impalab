@@ -315,6 +315,9 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     #[serde(skip_serializing_if = "Option::is_none")]
     gen_meta: Option<serde_json::Value>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exec_meta: Option<serde_json::Value>,
+
     metric: serde_json::Number,
   }
 
@@ -329,7 +332,7 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
     }
 
     match parse_native_line(&line) {
-      Ok((data_token, metric)) => {
+      Ok((metric, data_token, exec_meta)) => {
         let gen_meta =
           extract_gen_meta(&data_token).map_err(|e| BenchmarkError::MalformedExecOutput {
             line: line.clone(),
@@ -339,6 +342,7 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
         let result = BenchmarkResult {
           meta,
           gen_meta,
+          exec_meta,
           data_token,
           metric,
         };
@@ -380,26 +384,40 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   Ok(())
 }
 
-/// Parses a single line of `data_token,metric` CSV.
-fn parse_native_line(line: &str) -> Result<(String, serde_json::Number), BenchmarkError> {
-  let parts: Vec<&str> = line.split(',').collect();
+/// Parses a single line of `metric|data_token[|exec_meta]` pipe-delimited format.
+fn parse_native_line(
+  line: &str,
+) -> Result<(serde_json::Number, String, Option<serde_json::Value>), BenchmarkError> {
+  let parts: Vec<&str> = line.splitn(3, '|').collect();
 
-  if parts.len() != 2 {
-    return Err(BenchmarkError::CsvParts {
+  if parts.len() < 2 {
+    return Err(BenchmarkError::PipeParts {
       parts: parts.len(),
       line: line.to_string(),
     });
   }
 
-  let data_token = parts[0].to_string();
-  let metric = serde_json::from_str::<serde_json::Number>(parts[1]).map_err(|e| {
+  let data_token = parts[1].to_string();
+  let metric = serde_json::from_str::<serde_json::Number>(parts[0]).map_err(|e| {
     BenchmarkError::ParseMetric {
-      metric: parts[1].to_string(),
+      metric: parts[0].to_string(),
       source: e,
     }
   })?;
 
-  Ok((data_token, metric))
+  let exec_meta = if parts.len() == 3 {
+    Some(
+      serde_json::from_str(parts[2]).map_err(|e| BenchmarkError::MalformedJSON {
+        context: "exec_meta".to_string(),
+        raw_segment: parts[2].to_string(),
+        source: e,
+      })?,
+    )
+  } else {
+    None
+  };
+
+  Ok((metric, data_token, exec_meta))
 }
 
 #[cfg(test)]
@@ -408,16 +426,69 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_valid() {
-    let (id, metric) = parse_native_line("run_123,45000").unwrap();
+    let (metric, id, meta) = parse_native_line("45000|run_123").unwrap();
     assert_eq!(id, "run_123");
     assert_eq!(metric, serde_json::Number::from(45000));
+    assert!(meta.is_none());
   }
 
   #[test]
   fn test_parse_native_line_valid_float() {
-    let (id, metric) = parse_native_line("run_123,45.52").unwrap();
+    let (metric, id, meta) = parse_native_line("45.52|run_123").unwrap();
     assert_eq!(id, "run_123");
     assert_eq!(metric, serde_json::Number::from_f64(45.52).unwrap());
+    assert!(meta.is_none());
+  }
+
+  #[test]
+  fn test_parse_native_line_with_meta() {
+    let (metric, id, meta) =
+      parse_native_line(r#"450|run_1|{"converged":true,"iters":10}"#).unwrap();
+    assert_eq!(id, "run_1");
+    assert_eq!(metric, serde_json::Number::from(450));
+    let meta = meta.unwrap();
+    assert_eq!(meta["converged"], true);
+    assert_eq!(meta["iters"], 10);
+  }
+
+  #[test]
+  fn test_parse_native_line_with_malformed_meta() {
+    let res = parse_native_line(r#"450|run_1|{"bad":true"#);
+
+    assert!(matches!(res, Err(BenchmarkError::MalformedJSON { .. })));
+  }
+
+  #[test]
+  fn test_parse_native_line_newline_failure() {
+    let res = parse_native_line("450|run_1|{");
+
+    match res {
+      Err(BenchmarkError::MalformedJSON {
+        context,
+        raw_segment,
+        ..
+      }) => {
+        assert_eq!(context, "exec_meta");
+        assert_eq!(raw_segment, "{");
+      }
+      _ => panic!("Expected MalformedJSON"),
+    }
+  }
+
+  #[test]
+  fn test_parse_native_line_nested_array() {
+    let (metric, id, meta) = parse_native_line(r#"450|run_1|[1, 2, {"a": "b"}]"#).unwrap();
+    assert_eq!(id, "run_1");
+    assert_eq!(metric, serde_json::Number::from(450));
+    assert!(meta.unwrap().is_array());
+  }
+
+  #[test]
+  fn test_parse_native_line_with_nested_pipes_in_meta() {
+    let (metric, id, meta) = parse_native_line(r#"450|run_1|{"msg":"foo|bar"}"#).unwrap();
+    assert_eq!(id, "run_1");
+    assert_eq!(metric, serde_json::Number::from(450));
+    assert_eq!(meta.unwrap()["msg"], "foo|bar");
   }
 
   #[test]
@@ -446,25 +517,16 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_malformed_parts_too_few() {
-    let res = parse_native_line("run_123");
+    let res = parse_native_line("45000");
     assert!(matches!(
       res,
-      Err(BenchmarkError::CsvParts { parts: 1, .. })
-    ));
-  }
-
-  #[test]
-  fn test_parse_native_line_malformed_parts_too_many() {
-    let res = parse_native_line("run_123,45000,extra");
-    assert!(matches!(
-      res,
-      Err(BenchmarkError::CsvParts { parts: 3, .. })
+      Err(BenchmarkError::PipeParts { parts: 1, .. })
     ));
   }
 
   #[test]
   fn test_parse_native_line_malformed_invalid_metric() {
-    let res = parse_native_line("run_123,fast");
+    let res = parse_native_line("fast|run_123");
     assert!(matches!(res, Err(BenchmarkError::ParseMetric { .. })));
   }
 }

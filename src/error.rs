@@ -212,8 +212,8 @@ pub enum BenchmarkError {
     source: Box<BenchmarkError>, // Wraps parsing errors
   },
 
-  #[error("Expected 3 CSV parts, got {parts} for line: {line}")]
-  CsvParts { parts: usize, line: String },
+  #[error("Expected at least 2 pipe-delimited parts, got {parts} for line: {line}")]
+  PipeParts { parts: usize, line: String },
 
   #[error("Failed to parse metric '{metric}'")]
   ParseMetric {

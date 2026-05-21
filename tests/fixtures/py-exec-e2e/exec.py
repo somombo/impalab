@@ -61,7 +61,7 @@ def main():
         
         example_metric = run(target, input_data, **kwargs)
 
-        print(f"{test_data_token},{example_metric}")
+        print(f"{example_metric}|{test_data_token}")
 
 if __name__ == '__main__':
     main()
