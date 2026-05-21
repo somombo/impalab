@@ -12,4 +12,4 @@ type = "executor"
 
 [components.run]
 command = "python3"
-args = ["-c", "import sys; [print(line.split(',')[0] + ',42') for line in sys.stdin]"]
+args = ["-c", "import sys; [print('42|' + line.split(',')[0]) for line in sys.stdin]"]

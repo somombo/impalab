@@ -1,0 +1,7 @@
+[[components]]
+name = "exec-meta-executor"
+type = "executor"
+
+[components.run]
+command = "bash"
+args = ["-c", "printf '3.142||{\"converged\": true}\n'"]

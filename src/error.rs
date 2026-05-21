@@ -198,7 +198,14 @@ pub enum BenchmarkError {
   ReadExecStdout(#[source] std::io::Error),
 
   #[error("Failed to serialize benchmark result")]
-  SerializeResult(#[from] serde_json::Error),
+  SerializeResult(#[source] serde_json::Error),
+
+  #[error("Failed to parse execution metadata '{meta}'")]
+  ParseExecMeta {
+    meta: String,
+    #[source]
+    source: serde_json::Error,
+  },
 
   #[error("Malformed output line from executor: {line}")]
   MalformedExecOutput {
@@ -207,8 +214,8 @@ pub enum BenchmarkError {
     source: Box<BenchmarkError>, // Wraps parsing errors
   },
 
-  #[error("Expected 3 CSV parts, got {parts} for line: {line}")]
-  CsvParts { parts: usize, line: String },
+  #[error("Expected at least 2 pipe-delimited parts, got {parts} for line: {line}")]
+  PipeParts { parts: usize, line: String },
 
   #[error("Failed to parse metric '{metric}'")]
   ParseMetric {
