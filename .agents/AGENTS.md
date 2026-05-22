@@ -1,5 +1,3 @@
-Double check the project is in a valid state with:
-
-```
-cargo check --all-targets && cargo test && cargo clippy --all-targets -- -D warnings && cargo +nightly fmt --all --check
-```
+- Use the included `documenting-impalab` and `testing-impalab` skills for documentation and tests.
+- Limit inline comments to non-obvious intent or complexity e.g. it should never never explain syntax via comments. 
+- Prefer to make changes that are as easy as possible for human to review e.g by inspecting git diff.

@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ImpafileConfiguration",
+  "description": "JSON Schema for impafile.toml configurations in Impalab",
+  "type": "object",
+  "properties": {
+    "components": {
+      "type": "array",
+      "description": "A list of components defined within this directory.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique identifier for the component."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["generator", "executor"],
+            "description": "The component role. Must be 'generator' or 'executor'."
+          },
+          "build": {
+            "type": "object",
+            "description": "Instructions on how to compile or build the component.",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The build tool or executable to run (e.g., 'cargo', 'zig')."
+              },
+              "args": {
+                "type": "array",
+                "description": "Arguments passed to the build command.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "working_dir": {
+                "type": "string",
+                "description": "Working directory for the build command, relative to impafile.toml."
+              }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+          },
+          "run": {
+            "type": "object",
+            "description": "Instructions on how to run the component executable.",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The executable or runner to run (e.g., 'python3', './run_binary')."
+              },
+              "args": {
+                "type": "array",
+                "description": "Base arguments passed to the run command.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "working_dir": {
+                "type": "string",
+                "description": "Working directory for the run command, relative to impafile.toml."
+              }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "type", "run"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["components"],
+  "additionalProperties": false
+}
