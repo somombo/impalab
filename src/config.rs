@@ -34,7 +34,7 @@ struct RawConfig {
   components: HashMap<String, ManifestComponent>,
   reps: Option<usize>,
   #[serde(default)]
-  attributes: HashMap<String, serde_json::Value>,
+  attributes: serde_json::Map<String, serde_json::Value>,
 }
 
 impl RawConfig {
@@ -80,20 +80,6 @@ impl RawConfig {
   fn resolve_all(&self, root_dir: &std::path::Path) -> Result<ResolvedConfig, ConfigError> {
     let mut errors = Vec::new();
 
-    let validate_attributes = |attrs: &HashMap<String, serde_json::Value>,
-                               errors: &mut Vec<ConfigError>| {
-      for (k, v) in attrs {
-        if !v.is_number() && !v.is_string() && !v.is_boolean() && !v.is_null() {
-          errors.push(ConfigError::InvalidAttribute {
-            key: k.clone(),
-            value: v.to_string(),
-          });
-        }
-      }
-    };
-
-    validate_attributes(&self.attributes, &mut errors);
-
     let mut resolved_generator = None;
     if let Some(generator_cfg) = self.generator.as_ref() {
       match self.resolve_component(&generator_cfg.name, ComponentType::Generator, root_dir) {
@@ -125,10 +111,15 @@ impl RawConfig {
               continue;
             }
 
-            let mut effective_attributes = self.attributes.clone();
-            effective_attributes.extend(task.attributes.clone());
-
-            validate_attributes(&task.attributes, &mut errors);
+            let mut effective_val = serde_json::Value::Object(self.attributes.clone());
+            merge_patch(
+              &mut effective_val,
+              serde_json::Value::Object(task.attributes.clone()),
+            );
+            let effective_attributes = effective_val
+              .as_object()
+              .expect("effective_val is guaranteed to be a JSON Object because it is initialized from self.attributes and merge_patch preserves the Object structure")
+              .clone();
 
             resolved_tasks.push(ResolvedTask {
               executor: task.executor_name.clone(),
@@ -165,7 +156,7 @@ pub struct Task {
 
   pub reps: Option<usize>,
   #[serde(default)]
-  pub attributes: HashMap<String, serde_json::Value>,
+  pub attributes: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,7 +165,7 @@ pub struct ResolvedTask {
   pub args: Vec<String>,
   pub command_args: CommandArgs,
   pub effective_reps: usize,
-  pub effective_attributes: HashMap<String, serde_json::Value>,
+  pub effective_attributes: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -284,6 +275,26 @@ impl RawConfig {
       .extract()
       .map_err(|err| ConfigError::FigmentError(Box::new(err)))?;
     Ok(raw)
+  }
+}
+
+/// RFC 7396 JSON Merge Patch
+fn merge_patch(target: &mut serde_json::Value, patch: serde_json::Value) {
+  if let serde_json::Value::Object(patch_obj) = patch {
+    if !target.is_object() {
+      *target = serde_json::Value::Object(serde_json::Map::new());
+    }
+    let target_obj = target.as_object_mut().unwrap(); // safe to unwrap since we guaranteed it is an object above.
+    for (k, v) in patch_obj {
+      if v.is_null() {
+        target_obj.remove(&k);
+      } else {
+        let entry = target_obj.entry(k).or_insert(serde_json::Value::Null);
+        merge_patch(entry, v);
+      }
+    }
+  } else {
+    *target = patch;
   }
 }
 
@@ -491,7 +502,7 @@ mod tests {
         executor_name: "my-exec".to_string(),
         args: vec!["run-this".to_string()],
         reps: None,
-        attributes: HashMap::new(),
+        attributes: serde_json::Map::new(),
       }]),
       components: {
         let mut map = HashMap::new();
@@ -539,7 +550,7 @@ mod tests {
         executor_name: "missing-exec".to_string(),
         args: vec![],
         reps: None,
-        attributes: HashMap::new(),
+        attributes: serde_json::Map::new(),
       }]),
       components: HashMap::new(),
       ..Default::default()
@@ -575,7 +586,7 @@ mod tests {
         executor_name: "not-an-executor".to_string(),
         args: vec![],
         reps: None,
-        attributes: HashMap::new(),
+        attributes: serde_json::Map::new(),
       }]),
       components,
       ..Default::default()
@@ -615,7 +626,7 @@ mod tests {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: Some(10),
-        attributes: HashMap::new(),
+        attributes: serde_json::Map::new(),
       }]),
       components: components.clone(),
       ..Default::default()
@@ -630,7 +641,7 @@ mod tests {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: None,
-        attributes: HashMap::new(),
+        attributes: serde_json::Map::new(),
       }]),
       components: components.clone(),
       ..Default::default()
@@ -645,7 +656,7 @@ mod tests {
         executor_name: "exec".to_string(),
         args: vec![],
         reps: None,
-        attributes: HashMap::new(),
+        attributes: serde_json::Map::new(),
       }]),
       components: components.clone(),
       ..Default::default()
@@ -669,15 +680,17 @@ mod tests {
       },
     );
 
-    let mut global_attributes = HashMap::new();
+    let mut global_attributes = serde_json::Map::new();
     global_attributes.insert("env".to_string(), json!("prod"));
     global_attributes.insert("shared".to_string(), json!("base"));
     global_attributes.insert("threads".to_string(), json!(4));
 
-    let mut task_attributes = HashMap::new();
+    let mut task_attributes = serde_json::Map::new();
     task_attributes.insert("shared".to_string(), json!("override"));
     task_attributes.insert("task-only".to_string(), json!("value"));
     task_attributes.insert("simd".to_string(), json!(true));
+    task_attributes.insert("nested".to_string(), json!({"inner": "new", "extra": 1}));
+    task_attributes.insert("env".to_string(), serde_json::Value::Null); // Should delete "env"
 
     let raw = RawConfig {
       attributes: global_attributes,
@@ -694,11 +707,15 @@ mod tests {
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
     let attributes = &resolved.tasks[0].effective_attributes;
 
-    assert_eq!(attributes.get("env").unwrap(), &json!("prod"));
+    assert_eq!(attributes.get("env"), None); // Deleted
     assert_eq!(attributes.get("shared").unwrap(), &json!("override"));
     assert_eq!(attributes.get("task-only").unwrap(), &json!("value"));
     assert_eq!(attributes.get("threads").unwrap(), &json!(4));
     assert_eq!(attributes.get("simd").unwrap(), &json!(true));
+    assert_eq!(
+      attributes.get("nested").unwrap(),
+      &json!({"inner": "new", "extra": 1})
+    );
     assert_eq!(attributes.len(), 5);
   }
 
@@ -717,13 +734,21 @@ mod tests {
       },
     );
 
-    let mut global_attributes = HashMap::new();
+    let mut global_attributes = serde_json::Map::new();
     global_attributes.insert("env".to_string(), json!("prod"));
     global_attributes.insert("version".to_string(), json!("1.0"));
+    global_attributes.insert(
+      "nested".to_string(),
+      json!({"base": true, "feature": false}),
+    );
 
-    let mut task_attributes = HashMap::new();
+    let mut task_attributes = serde_json::Map::new();
     task_attributes.insert("version".to_string(), json!("2.0"));
     task_attributes.insert("tier".to_string(), json!("high"));
+    task_attributes.insert(
+      "nested".to_string(),
+      json!({"feature": true, "other": null}),
+    );
 
     let raw = RawConfig {
       generator: None,
@@ -761,7 +786,7 @@ mod tests {
         .unwrap(),
       &json!("1.0")
     );
-    assert_eq!(resolved.tasks[0].effective_attributes.len(), 2);
+    assert_eq!(resolved.tasks[0].effective_attributes.len(), 3);
 
     // Task 1 overrides global reps and merges/overwrites attributes
     assert_eq!(resolved.tasks[1].effective_reps, 10);
@@ -780,7 +805,14 @@ mod tests {
       resolved.tasks[1].effective_attributes.get("tier").unwrap(),
       &json!("high")
     );
-    assert_eq!(resolved.tasks[1].effective_attributes.len(), 3);
+    assert_eq!(
+      resolved.tasks[1]
+        .effective_attributes
+        .get("nested")
+        .unwrap(),
+      &json!({"base": true, "feature": true})
+    );
+    assert_eq!(resolved.tasks[1].effective_attributes.len(), 4);
   }
 
   #[test]
@@ -798,25 +830,5 @@ mod tests {
     assert_eq!(attrs.get("count").unwrap(), &json!(42));
     assert_eq!(attrs.get("debug").unwrap(), &json!(true));
     assert_eq!(attrs.get("label").unwrap(), &json!("foo"));
-  }
-
-  #[test]
-  fn test_raw_config_resolve_all_invalid_attribute() {
-    let mut attributes = HashMap::new();
-    attributes.insert("nested".to_string(), json!({ "a": 1 }));
-
-    let raw = RawConfig {
-      attributes,
-      components: HashMap::new(),
-      ..Default::default()
-    };
-
-    let res = raw.resolve_all(std::path::Path::new("."));
-    match res {
-      Err(ConfigError::GraphValidationFailed(errs)) => {
-        assert!(matches!(errs[0], ConfigError::InvalidAttribute { .. }));
-      }
-      _ => panic!("Expected GraphValidationFailed with InvalidAttribute"),
-    }
   }
 }

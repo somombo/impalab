@@ -18,7 +18,7 @@ use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use base64::Engine;
 use serde::Serialize;
-use std::collections::HashMap;
+
 use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
@@ -33,11 +33,12 @@ struct BenchmarkMeta {
 
   executor: String,
 
-  #[serde(rename = "args")]
+  #[serde(rename = "args", skip_serializing_if = "Vec::is_empty")]
   task_args: Vec<String>,
 
   rep_index: usize,
-  attributes: HashMap<String, serde_json::Value>,
+  #[serde(skip_serializing_if = "serde_json::Map::is_empty")]
+  attributes: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Main benchmark runner.
@@ -279,14 +280,22 @@ async fn run_pipeline(
   Ok(())
 }
 
-fn extract_gen_meta(token: &str) -> Option<serde_json::Value> {
+fn extract_gen_meta(token: &str) -> Result<Option<serde_json::Value>, BenchmarkError> {
   if let Some(encoded) = token.strip_prefix("meta:") {
-    base64::engine::general_purpose::STANDARD
-      .decode(encoded)
-      .ok()
-      .and_then(|decoded| serde_json::from_slice(&decoded).ok())
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+      match serde_json::from_slice(&decoded) {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => Err(BenchmarkError::MalformedJSON {
+          context: "gen_meta".to_string(),
+          raw_segment: token.to_string(),
+          source: e,
+        }),
+      }
+    } else {
+      Ok(None)
+    }
   } else {
-    None
+    Ok(None)
   }
 }
 
@@ -324,9 +333,15 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
 
     match parse_native_line(&line) {
       Ok((metric, data_token, exec_meta)) => {
+        let gen_meta =
+          extract_gen_meta(&data_token).map_err(|e| BenchmarkError::MalformedExecOutput {
+            line: line.clone(),
+            source: Box::new(e),
+          })?;
+
         let result = BenchmarkResult {
           meta,
-          gen_meta: extract_gen_meta(&data_token),
+          gen_meta,
           exec_meta,
           data_token,
           metric,
@@ -392,8 +407,9 @@ fn parse_native_line(
 
   let exec_meta = if parts.len() == 3 {
     Some(
-      serde_json::from_str(parts[2]).map_err(|e| BenchmarkError::ParseExecMeta {
-        meta: parts[2].to_string(),
+      serde_json::from_str(parts[2]).map_err(|e| BenchmarkError::MalformedJSON {
+        context: "exec_meta".to_string(),
+        raw_segment: parts[2].to_string(),
         source: e,
       })?,
     )
@@ -439,7 +455,32 @@ mod tests {
   fn test_parse_native_line_with_malformed_meta() {
     let res = parse_native_line(r#"450|run_1|{"bad":true"#);
 
-    assert!(matches!(res, Err(BenchmarkError::ParseExecMeta { .. })));
+    assert!(matches!(res, Err(BenchmarkError::MalformedJSON { .. })));
+  }
+
+  #[test]
+  fn test_parse_native_line_newline_failure() {
+    let res = parse_native_line("450|run_1|{");
+
+    match res {
+      Err(BenchmarkError::MalformedJSON {
+        context,
+        raw_segment,
+        ..
+      }) => {
+        assert_eq!(context, "exec_meta");
+        assert_eq!(raw_segment, "{");
+      }
+      _ => panic!("Expected MalformedJSON"),
+    }
+  }
+
+  #[test]
+  fn test_parse_native_line_nested_array() {
+    let (metric, id, meta) = parse_native_line(r#"450|run_1|[1, 2, {"a": "b"}]"#).unwrap();
+    assert_eq!(id, "run_1");
+    assert_eq!(metric, serde_json::Number::from(450));
+    assert!(meta.unwrap().is_array());
   }
 
   #[test]
@@ -456,22 +497,22 @@ mod tests {
     let json_str = r#"{"size": 100}"#;
     let encoded = base64::engine::general_purpose::STANDARD.encode(json_str);
     let id = format!("meta:{}", encoded);
-    let meta = extract_gen_meta(&id);
+    let meta = extract_gen_meta(&id).unwrap();
     assert_eq!(meta.unwrap()["size"], 100);
 
     // Plain string
-    let meta = extract_gen_meta("run_1");
+    let meta = extract_gen_meta("run_1").unwrap();
     assert!(meta.is_none());
 
     // Invalid Base64
-    let meta = extract_gen_meta("meta:!@#$");
+    let meta = extract_gen_meta("meta:!@#$").unwrap();
     assert!(meta.is_none());
 
     // Invalid JSON
     let encoded = base64::engine::general_purpose::STANDARD.encode("not_json");
     let id = format!("meta:{}", encoded);
-    let meta = extract_gen_meta(&id);
-    assert!(meta.is_none());
+    let res = extract_gen_meta(&id);
+    assert!(matches!(res, Err(BenchmarkError::MalformedJSON { .. })));
   }
 
   #[test]

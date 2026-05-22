@@ -133,6 +133,10 @@ meta:eyJzaXplIjogMTAwfSwxLDIsMyw0
 > **Keep Metadata Small**
 > To avoid skewing performance metrics due to excessive I/O overhead between the generator and executor, it is strongly recommended to keep the JSON payload small (e.g., < 1KB).
 
+> [!WARNING]
+> **Minified JSON Constraint**
+> All JSON output by components (both `gen_meta` and `exec_meta`) MUST be minified onto a single line. Newline characters (`\n`) within the JSON payload will break the orchestrator's IPC stream parser.
+
 ### Executor Executable
 
 - **Must** accept any task-specific arguments passed via the `args` array in the JSON configuration.
@@ -141,7 +145,7 @@ meta:eyJzaXplIjogMTAwfSwxLDIsMyw0
 - **Must** print results to `stdout` in a pipe-delimited format: `metric|data_token[|exec_meta]`.
     - **metric**: Any numeric outcome (integer or float).
     - **data_token**: The unique identifier from the generator.
-    - **exec_meta** (Optional): A flat JSON object containing dynamic execution metadata.
+    - **exec_meta** (Optional): Any valid JSON (primitives, arrays, objects) containing dynamic execution metadata.
 - `stderr` will be captured and forwarded by `impa` for logging.
 
 > [!NOTE]
@@ -236,7 +240,11 @@ The `reps` field allows you to execute each task multiple times to gather more s
 
 You can attach arbitrary metadata to your benchmark results using `attributes`. Attributes can be defined at the global level (applying to all tasks) or within individual tasks. Task-level attributes will be merged with global attributes, and can overwrite them if the keys match. In the example above, the `python-executors` task overrides the global `"cpu"` attribute with `"arm64"`.
 
-Unlike standard attributes which are often restricted to strings, Impalab attributes support mixed JSON primitive types (strings, integers, booleans). This allows you to pass structured configuration directly through to your analysis tools without manual type casting.
+Unlike standard attributes which are often restricted to strings, Impalab attributes support any valid JSON (primitives, arrays, objects). This allows you to pass structured configuration directly through to your analysis tools without manual type casting.
+
+> [!IMPORTANT]
+> **RFC 7396 Trade-offs**
+> Impalab attributes utilize JSON Merge Patch (RFC 7396) semantics for configuration overriding. This means that setting an attribute key to `null` in a task definition acts as a deletion operator, removing that key from the inherited global attributes. Consequently, `null` cannot be passed as a literal value for an attribute.
 
 ### Running "Self-Contained" Executors
 
@@ -251,7 +259,7 @@ By omitting the generator, the executor's `stdin` is automatically connected to 
 
 ## Benchmark Output & Analysis
 
-`impa` captures the pipe-delimited output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, any resolved `attributes`, and optional metadata from both the generator and the executor.
+`impa` captures the pipe-delimited output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, any resolved `attributes`, and optional metadata from both the generator and the executor. To keep the output clean, empty fields (such as `args` or `attributes` when they are empty) and missing metadata fields are omitted from the JSON object.
 
 ```json
 {"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"run_1","metric":450}
@@ -259,7 +267,27 @@ By omitting the generator, the executor's `stdin` is automatically connected to 
 {"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"run_1","exec_meta":{"converged":true},"metric":52000}
 ```
 
-This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment. For example, you can easily load the output into a **Jupyter notebook**, parse each line, and build a `pandas.DataFrame` for sophisticated analysis and visualization. Since attributes retain their primitive types, tools like pandas will automatically infer the correct numeric or boolean types for your columns.
+This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment like a **Jupyter notebook** using Python and Pandas.
+
+#### Data Science Workflow (Pandas)
+
+When dealing with nested JSON arrays and objects in your `attributes`, `gen_meta`, or `exec_meta`, you can use `pandas.json_normalize()` to automatically flatten the nested metadata into a clean DataFrame.
+
+```python
+import pandas as pd
+import json
+
+with open("results.jsonl") as f:
+    data = [json.loads(line) for line in f]
+
+# Flatten nested JSON structures (e.g. attributes.cpu, exec_meta.converged)
+df = pd.json_normalize(data)
+print(df.head())
+```
+
+> [!TIP]
+> **Best Practices for Metadata**
+> While Impalab supports complex, nested JSON, we recommend keeping metadata as flat and consistent as possible to avoid heterogeneous typing issues downstream when analyzing the data.
 
 ## Command-Line Reference
 

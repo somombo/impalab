@@ -143,11 +143,6 @@ pub enum ConfigError {
     available: Vec<String>,
   },
 
-  #[error(
-    "Attribute '{key}' must be a primitive (number, string, boolean, or null). Found: {value}"
-  )]
-  InvalidAttribute { key: String, value: String },
-
   #[error("Component resolution graph validation failed: {0:?}")]
   GraphValidationFailed(Vec<ConfigError>),
 }
@@ -200,9 +195,12 @@ pub enum BenchmarkError {
   #[error("Failed to serialize benchmark result")]
   SerializeResult(#[source] serde_json::Error),
 
-  #[error("Failed to parse execution metadata '{meta}'")]
-  ParseExecMeta {
-    meta: String,
+  #[error(
+    "Failed to parse {context} as JSON. Ensure your executor is outputting minified JSON on a single line without newline characters (\\n). Raw segment: '{raw_segment}'"
+  )]
+  MalformedJSON {
+    context: String,
+    raw_segment: String,
     #[source]
     source: serde_json::Error,
   },
