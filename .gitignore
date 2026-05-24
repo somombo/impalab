@@ -16,3 +16,5 @@ target/
 **/__delete/**
 
 impa_manifest.json
+__pycache__
+.pytest_cache
