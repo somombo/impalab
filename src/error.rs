@@ -222,9 +222,9 @@ pub enum BenchmarkError {
     source: serde_json::Error,
   },
 
-  #[error("Failed to read {component_type:?} stderr")]
+  #[error("Failed to read stderr for component '{component_name}'")]
   ReadStderr {
-    component_type: ComponentType,
+    component_name: String,
     #[source]
     source: std::io::Error,
   },

@@ -519,3 +519,44 @@ fn test_run_with_exec_meta() {
     ))
     .stdout(predicate::str::contains(r#""metric":3.142"#));
 }
+
+#[test]
+fn test_generator_seed_env_var_validation() {
+  // Verify that the generator script fails if IMPALAB_SEED is not set
+  let mut cmd_missing = Command::new("python3");
+  cmd_missing.arg("tests/fixtures/py-gen-e2e/gen.py");
+  let assert_missing = cmd_missing.env_clear().assert();
+  assert_missing.failure();
+
+  // Verify that the generator script fails if IMPALAB_SEED is set to a non-integer
+  let mut cmd_invalid = Command::new("python3");
+  cmd_invalid
+    .arg("tests/fixtures/py-gen-e2e/gen.py")
+    .env("IMPALAB_SEED", "not-a-number");
+  let assert_invalid = cmd_invalid.assert();
+  assert_invalid.failure();
+
+  // Verify that the generator script fails if IMPALAB_SEED is set to a negative integer
+  let mut cmd_negative = Command::new("python3");
+  cmd_negative
+    .arg("tests/fixtures/py-gen-e2e/gen.py")
+    .env("IMPALAB_SEED", "-42");
+  let assert_negative = cmd_negative.assert();
+  assert_negative.failure();
+
+  // Verify that the generator script fails if IMPALAB_SEED is set to an integer larger than u64 max
+  let mut cmd_overflow = Command::new("python3");
+  cmd_overflow
+    .arg("tests/fixtures/py-gen-e2e/gen.py")
+    .env("IMPALAB_SEED", "18446744073709551616");
+  let assert_overflow = cmd_overflow.assert();
+  assert_overflow.failure();
+
+  // Verify that the generator script succeeds if IMPALAB_SEED is set to a valid u64
+  let mut cmd_valid = Command::new("python3");
+  cmd_valid
+    .arg("tests/fixtures/py-gen-e2e/gen.py")
+    .env("IMPALAB_SEED", "42");
+  let assert_valid = cmd_valid.assert();
+  assert_valid.success();
+}

@@ -86,9 +86,12 @@ impl RawConfig {
         Ok(mut cmp) => {
           let seed = generator_cfg.seed.unwrap_or_else(rand::random);
           tracing::info!(seed, "Using generator seed");
-          cmp.run.args.push(format!("--seed={}", seed));
           cmp.run.args.extend(generator_cfg.args.to_owned());
-          resolved_generator = Some(cmp.run);
+          resolved_generator = Some(ResolvedGenerator {
+            name: generator_cfg.name.clone(),
+            seed,
+            command_args: cmp.run,
+          });
         }
         Err(e) => errors.push(e),
       }
@@ -169,8 +172,15 @@ pub struct ResolvedTask {
 }
 
 #[derive(Debug, Clone)]
+pub struct ResolvedGenerator {
+  pub name: String,
+  pub seed: u64,
+  pub command_args: CommandArgs,
+}
+
+#[derive(Debug, Clone)]
 pub struct ResolvedConfig {
-  pub generator: Option<CommandArgs>,
+  pub generator: Option<ResolvedGenerator>,
   pub tasks: Vec<ResolvedTask>,
 }
 
@@ -534,7 +544,12 @@ mod tests {
     };
 
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
-    assert!(resolved.generator.is_some());
+    {
+      let gen_resolved = resolved.generator.as_ref().unwrap();
+      assert_eq!(gen_resolved.name, "my-gen");
+      assert_eq!(gen_resolved.seed, 123);
+      assert_eq!(gen_resolved.command_args.args, vec!["--extra"]);
+    }
     assert_eq!(resolved.tasks.len(), 1);
     assert_eq!(
       resolved.tasks[0].command_args.args,
