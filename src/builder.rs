@@ -19,7 +19,7 @@ use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use crate::manifest::ManifestComponent;
 use serde::Deserialize;
-use std::collections::hash_map::Entry;
+use std::collections::btree_map::Entry;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
