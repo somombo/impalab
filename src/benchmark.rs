@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::config::ResolvedConfig;
+use crate::config::ResolvedGenerator;
 use crate::config::ResolvedTask;
 use crate::error::BenchmarkError;
-use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use base64::Engine;
 use serde::Serialize;
@@ -52,9 +52,15 @@ pub async fn run_benchmarks(
     tasks,
   }: ResolvedConfig,
 ) -> Result<(), BenchmarkError> {
-  let gen_info = if let Some(gen_cmd) = &gen_cmd_args {
+  let gen_info = if let Some(ResolvedGenerator {
+    seed,
+    command_args: gen_cmd,
+    ..
+  }) = &gen_cmd_args
+  {
     format!(
-      "dir = {:?}, generator = {}, args = {:?}",
+      "seed = {}, dir = {:?}, generator = {}, args = {:?}",
+      seed,
       gen_cmd.working_dir,
       gen_cmd.command.display(),
       gen_cmd.args
@@ -126,7 +132,7 @@ pub async fn run_benchmarks(
 /// Spawns and manages the generator -> executor pipeline for one language.
 /// Handles both pipelined and self-contained (no generator) runs.
 async fn run_pipeline(
-  generator_cmd_args: Option<&CommandArgs>,
+  generator_cfg: Option<&ResolvedGenerator>,
   (
     task_index,
     ResolvedTask {
@@ -134,7 +140,7 @@ async fn run_pipeline(
       args: task_args,
       command_args,
       effective_attributes,
-      effective_reps: _,
+      effective_reps,
     },
   ): (usize, &ResolvedTask),
   rep_index: usize,
@@ -154,26 +160,44 @@ async fn run_pipeline(
     exec_cmd.current_dir(dir);
   }
 
+  exec_cmd
+    .env("IMPALAB_COMPONENT_NAME", executor_name)
+    .env("IMPALAB_TASK_INDEX", task_index.to_string())
+    .env("IMPALAB_REP_INDEX", rep_index.to_string())
+    .env("IMPALAB_REPS", effective_reps.to_string())
+    .env(
+      "IMPALAB_ATTRIBUTES",
+      serde_json::to_string(&effective_attributes).unwrap(), // unwrapping here is safe because `effective_attributes` is a `serde_json::Map` with string keys
+    );
+
   // --- Configure Generator (if provided) ---
-  if let Some(CommandArgs {
-    args: gen_args,
-    command: gen_cmd_path,
-    working_dir: gen_dir,
-  }) = generator_cmd_args
+  if let Some(ResolvedGenerator {
+    name,
+    seed,
+    command_args: gen_command_args,
+  }) = generator_cfg
   {
     // --- Pipelined Mode ---
-    let mut gen_cmd = Command::new(gen_cmd_path);
+    let mut gen_cmd = Command::new(&gen_command_args.command);
     gen_cmd
-      .args(gen_args)
+      .args(&gen_command_args.args)
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())
       .kill_on_drop(true);
 
-    if let Some(dir) = gen_dir {
+    if let Some(dir) = &gen_command_args.working_dir {
       gen_cmd.current_dir(dir);
     }
 
-    tracing::debug!(gen_dir = ?gen_dir, "Generator directory");
+    gen_cmd
+      .env("IMPALAB_COMPONENT_NAME", name)
+      .env("IMPALAB_SEED", seed.to_string())
+      .env(
+        "IMPALAB_ATTRIBUTES",
+        serde_json::to_string(&effective_attributes).unwrap(),
+      );
+
+    tracing::debug!(gen_dir = ?gen_command_args.working_dir, "Generator directory");
     tracing::debug!(cmd = ?gen_cmd, "Spawning generator");
     let mut gen_child = gen_cmd.spawn().map_err(BenchmarkError::SpawnGenerator)?;
 

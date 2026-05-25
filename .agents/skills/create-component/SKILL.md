@@ -67,8 +67,11 @@ To work with the Impalab orchestrator, your component executables must follow th
 Generators decouple test data generation from task execution.
 
 * **Command Line Arguments**:
-  * Must accept a `--seed=<u64>` argument. Impalab passes this argument to guarantee reproducibility.
   * May accept custom arguments to control characteristics of the test data (e.g., `--size=10000`).
+* **Environmental Variables**:
+  * `IMPALAB_COMPONENT_NAME`: The unique name of the generator component (e.g., `py-gen-e2e`).
+  * `IMPALAB_SEED`: A 64-bit unsigned integer (`u64`) seed (e.g., `42`) to guarantee reproducibility.
+  * `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
 * **Standard Output (stdout)**:
   * Must print generated test cases line-by-line to `stdout`.
   * Each line must represent a single test case, beginning with a unique `data_token`, followed by the input data.
@@ -87,6 +90,12 @@ Executors execute the benchmark work and measure performance.
 
 * **Command Line Arguments**:
   * Must accept any task-specific arguments defined in the json plan configuration.
+* **Environmental Variables**:
+  * `IMPALAB_COMPONENT_NAME`: The unique name of the executor component.
+  * `IMPALAB_TASK_INDEX`: The 0-based index of the task within the configuration's tasks list.
+  * `IMPALAB_REP_INDEX`: The current repetition run index (0-based) for the task.
+  * `IMPALAB_REPS`: The total number of repetitions planned for this task.
+  * `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
 * **Standard Input (stdin)**:
   * Must read test cases line-by-line from `stdin`, parsing the `data_token` and input data.
 * **Standard Output (stdout)**:

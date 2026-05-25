@@ -90,7 +90,6 @@ To work with Impalab, your component executables must follow a simple interface.
 
 ### Generator Executable
 
-- **Must** accept a `--seed=<u64>` argument, which will be provided by `impa`. This ensures that the exact same data is generated for each run, allowing for fair comparisons when testing across different languages.
 - **May** accept any number of custom arguments, which are defined in the benchmark configuration run plan. These are used to control the _characteristics_ of the test data (e.g., `--size=10000`).
 - **Must** print its generated data to `stdout`. Each line represents a single test case, starting with a unique `data_token` and followed by the input data. It could be JSONL, binary, space delimited, or CSV. The only contract requirement is that the generator encodes a `data_token` that is unique for each line and it encodes the data itself, and that the executor understands how to fully decode and parse that to get back the token and the data.
 - `stderr` will be captured and forwarded by `impa` for logging.
@@ -151,6 +150,24 @@ meta:eyJzaXplIjogMTAwfSwxLDIsMyw0
 > [!NOTE]
 > **What is a Metric?**
 > A `metric` can be any valid JSON number (integer or float). While frequently used for execution time (nanoseconds), it can also represent memory usage (bytes), accuracy (0.0 - 1.0), cost, or any other numeric outcome of your task.
+
+### Environmental Context
+
+Impalab injects dynamic execution state directly into component processes via environment variables. This purifies the component command line contract, keeping CLI arguments reserved strictly for user-defined configuration.
+
+#### Variables Injected into Generators
+
+- `IMPALAB_COMPONENT_NAME`: The unique name of the generator component (e.g. `py-gen-e2e`).
+- `IMPALAB_SEED`: A 64-bit unsigned integer (`u64`) seed (e.g. `42`) to guarantee reproducibility.
+- `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
+
+#### Variables Injected into Executors
+
+- `IMPALAB_COMPONENT_NAME`: The unique name of the executor component.
+- `IMPALAB_TASK_INDEX`: The 0-based index of the task within the configuration's tasks list.
+- `IMPALAB_REP_INDEX`: The current repetition run index (0-based) for the task.
+- `IMPALAB_REPS`: The total number of repetitions planned for this task.
+- `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
 
 **Example Output (from the Zig executor):**
 (This output corresponds to the generator input above for the task with `"args": ["linear_search"]`)
@@ -234,7 +251,7 @@ The `reps` field allows you to execute each task multiple times to gather more s
 
 > [!IMPORTANT]
 > **Generator Determinism - The Trust Contract**
-> The integrity of the `reps` feature relies entirely on the generator component producing the **exact same data stream** every time it receives the same `--seed`. If a generator ignores the seed and produces random data (e.g., using `random.random()` without seeding), each repetition will benchmark a different dataset, making the results incomparable. Component authors MUST ensure their generators honor the `--seed` contract.
+> The integrity of the `reps` feature relies entirely on the generator component producing the **exact same data stream** every time it receives the same `IMPALAB_SEED` environment variable. If a generator ignores the seed and produces random data (e.g., using `random.random()` without seeding), each repetition will benchmark a different dataset, making the results incomparable. Component authors MUST ensure their generators honor the `IMPALAB_SEED` contract.
 
 #### Configuration Attributes
 

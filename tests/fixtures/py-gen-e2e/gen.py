@@ -11,13 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 import sys
 
-# Find the --seed argument, which is passed as --seed=...
-seed = "default_seed"
-for arg in sys.argv:
-    if arg.startswith("--seed="):
-        seed = arg.split("=")[1]
+seed_str = os.environ.get("IMPALAB_SEED")
+if seed_str is None:
+    print("Error: IMPALAB_SEED environment variable is not set", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    seed = int(seed_str)
+    if seed < 0 or seed > 18446744073709551615:
+        raise ValueError()
+except ValueError:
+    print(f"Error: IMPALAB_SEED '{seed_str}' is not a valid u64", file=sys.stderr)
+    sys.exit(1)
 
 # Print one test case: id "test_case_1"
 # We'll include the seed in the output to prove it was received.
