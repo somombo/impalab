@@ -19,7 +19,7 @@ use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use crate::manifest::ManifestComponent;
 use serde::Deserialize;
-use std::collections::hash_map::Entry;
+use std::collections::btree_map::Entry;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -96,49 +96,59 @@ fn process_component(
   let impafile: Impafile = toml::from_str(&content).map_err(BuildError::TomlParse)?;
 
   for config in impafile.components {
-    if let Some(es) = &filter_args.exclude
+    // Excluded or non-included components bypass the build step but are still registered.
+    let should_build = if let Some(es) = &filter_args.exclude
       && es.contains(&config.name)
     {
-      continue;
+      false
     } else if let Some(is) = &filter_args.include
       && !is.contains(&config.name)
     {
-      continue;
-    }
+      false
+    } else {
+      true
+    };
 
-    // Run optional build step
-    if let Some(build_step) = &config.build {
-      tracing::info!(
-        "Building component: {} ({:?})",
-        config.name,
-        config.component_type
-      );
+    if should_build {
+      // Run optional build step
+      if let Some(build_step) = &config.build {
+        tracing::info!(
+          "Building component: {} ({:?})",
+          config.name,
+          config.component_type
+        );
 
-      let Output {
-        status,
-        stdout,
-        stderr,
-      } = Command::new(&build_step.command)
-        .args(&build_step.args)
-        .current_dir(base_dir)
-        .output()
-        .map_err(|e| BuildError::BuildCommandExecFailed {
-          component_name: config.name.clone(),
-          source: e,
-        })?;
-
-      if !status.success() {
-        let stderr = String::from_utf8_lossy(&stderr).to_string();
-        let stdout = String::from_utf8_lossy(&stdout).to_string();
-
-        return Err(BuildError::BuildCommandFailed {
-          component_name: config.name,
+        let Output {
+          status,
           stdout,
           stderr,
-        });
+        } = Command::new(&build_step.command)
+          .args(&build_step.args)
+          .current_dir(base_dir)
+          .output()
+          .map_err(|e| BuildError::BuildCommandExecFailed {
+            component_name: config.name.clone(),
+            source: e,
+          })?;
+
+        if !status.success() {
+          let stderr = String::from_utf8_lossy(&stderr).to_string();
+          let stdout = String::from_utf8_lossy(&stdout).to_string();
+
+          return Err(BuildError::BuildCommandFailed {
+            component_name: config.name,
+            stdout,
+            stderr,
+          });
+        }
+      } else {
+        tracing::info!("No build step for {}. Skipping.", config.name);
       }
     } else {
-      tracing::info!("No build step for {}. Skipping.", config.name);
+      tracing::info!(
+        "Component {} filtered out. Skipping build step.",
+        config.name
+      );
     }
 
     match manifest.components.entry(config.name) {

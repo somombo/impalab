@@ -49,9 +49,11 @@ pub enum Commands {
 
 #[derive(Debug, clap::Args)]
 pub struct FilterArgs {
+  /// Comma-separated list of components to execute build steps for.
   #[arg(long, value_delimiter = ',')]
   pub include: Option<Vec<String>>,
 
+  /// Comma-separated list of components to exclude from build step execution.
   #[arg(long, conflicts_with = "include", value_delimiter = ',')]
   pub exclude: Option<Vec<String>>,
 }
@@ -78,6 +80,7 @@ pub struct ManifestArgs<F: FileReader + Default + std::fmt::Debug = RealFileSyst
   #[arg(id = "root-dir", long, default_value = ".")]
   pub root_dir: PathBuf,
 
+  /// Filename for the build manifest.
   #[arg(id = "manifest-filename", long)]
   pub file_path: Option<PathBuf>,
 

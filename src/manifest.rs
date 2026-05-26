@@ -13,7 +13,7 @@
 // limitations under the License.
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -51,11 +51,9 @@ pub struct CommandArgs {
   pub working_dir: Option<PathBuf>,
 }
 
-pub type ComponentCommandMap = HashMap<String, ManifestComponent>;
-
 /// Defines the structure of the `impa_manifest.json` file.
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct BuildManifest {
-  /// A map of language names to their runnable `ManifestComponent`.
-  pub components: ComponentCommandMap,
+  /// A map of component names to their runnable `ManifestComponent`.
+  pub components: BTreeMap<String, ManifestComponent>,
 }
