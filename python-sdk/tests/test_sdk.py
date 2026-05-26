@@ -199,12 +199,41 @@ def test_lab_dataframe_conversion():
         assert df["task_label"].iloc[0] == "zig-executors linear_search"
         assert df["task_label"].iloc[1] == "zig-executors binary_search"
         assert df["attr.cpu"].iloc[0] == "x86_64"
+        assert df["attr.cpu"].dtype == "category"
         assert df["gen.size"].iloc[0] == 100
         assert df["exec.iters"].iloc[0] == 10
         assert pd.isna(df["exec.iters"].iloc[1]) # binary_search doesn't have exec_meta
     else:
         with pytest.raises(ImportError):
             lab.to_dataframe()
+
+def test_lab_dataframe_conversion_attributes_types():
+    try:
+        import pandas as pd
+        has_pandas = True
+    except ImportError:
+        has_pandas = False
+        
+    if not has_pandas:
+        return
+        
+    custom_results = [
+        {
+            "executor": "test",
+            "attributes": {"string_attr": "hello", "numeric_attr": 42, "mixed_attr": "world"},
+        },
+        {
+            "executor": "test",
+            "attributes": {"string_attr": "goodbye", "numeric_attr": 100, "mixed_attr": 200},
+        }
+    ]
+    lab = Lab(custom_results)
+    df = lab.to_dataframe()
+    
+    assert df["attr.string_attr"].dtype == "category"
+    assert df["attr.mixed_attr"].dtype == "category"  # has at least one string value
+    assert df["attr.numeric_attr"].dtype != "category"  # only numeric values, not a category
+
 
 def test_lab_summary_and_best():
     lab = Lab(MOCK_RESULTS_LIST)

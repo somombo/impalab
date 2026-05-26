@@ -40,6 +40,7 @@ class Lab:
             ) from e
 
         rows = []
+        string_attr_cols = set()
         for r in self.results:
             row = r.copy()
             
@@ -57,7 +58,10 @@ class Lab:
                 if isinstance(attrs, dict):
                     row.pop("attributes")
                     for k, v in attrs.items():
-                        row[f"attr.{k}"] = v
+                        col_name = f"attr.{k}"
+                        row[col_name] = v
+                        if isinstance(v, str):
+                            string_attr_cols.add(col_name)
                         
             if flatten_meta and "gen_meta" in row:
                 gen_m = row.get("gen_meta")
@@ -75,7 +79,11 @@ class Lab:
                         
             rows.append(row)
             
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+        for col in string_attr_cols:
+            if col in df.columns:
+                df[col] = df[col].astype("category")
+        return df
 
     def summary(self, lower_is_better: bool = True):
         """Return a summary of statistics for each task."""
