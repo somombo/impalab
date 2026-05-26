@@ -315,8 +315,8 @@ Scans for `impafile.toml` files, runs their build commands, and creates a JSON m
 - `--components-dir <PATH>`: The root directory containing component subdirectories. (Default: `.`)
 - `--root-dir <PATH>`: The output directory for the build manifest. (Default: `.`)
 - `--manifest-filename <PATH>`: The filename for the build manifest.
-- `--include <LIST>`: Comma-separated list of components to include in the build.
-- `--exclude <LIST>`: Comma-separated list of components to exclude from the build.
+- `--include <LIST>`: Comma-separated list of components to execute build steps for. Filtered-out components will still be registered in the manifest, but their build steps will not run.
+- `--exclude <LIST>`: Comma-separated list of components to exclude from build step execution. Excluded components will still be registered in the manifest, but their build steps will not run.
 
 ### `impa run`
 

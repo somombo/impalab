@@ -271,16 +271,22 @@ fn test_build_with_filters() {
     .arg("include_manifest.json")
     .arg("--include")
     .arg("py-gen-e2e")
+    .env("RUST_LOG", "info")
     .env("NO_COLOR", "1");
 
-  include_cmd.assert().success();
+  include_cmd
+    .assert()
+    .success()
+    .stderr(predicate::str::contains(
+      "Component python-e2e filtered out. Skipping build step.",
+    ));
 
   let manifest_path = temp.path().join("include_manifest.json");
   let manifest_content = fs::read_to_string(&manifest_path).unwrap();
   let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
 
   assert!(manifest_json["components"].get("py-gen-e2e").is_some());
-  assert!(manifest_json["components"].get("python-e2e").is_none());
+  assert!(manifest_json["components"].get("python-e2e").is_some());
 
   // Test --exclude
   let mut exclude_cmd = Command::new(cargo::cargo_bin!("impa"));
@@ -294,15 +300,21 @@ fn test_build_with_filters() {
     .arg("exclude_manifest.json")
     .arg("--exclude")
     .arg("py-gen-e2e")
+    .env("RUST_LOG", "info")
     .env("NO_COLOR", "1");
 
-  exclude_cmd.assert().success();
+  exclude_cmd
+    .assert()
+    .success()
+    .stderr(predicate::str::contains(
+      "Component py-gen-e2e filtered out. Skipping build step.",
+    ));
 
   let manifest_path = temp.path().join("exclude_manifest.json");
   let manifest_content = fs::read_to_string(&manifest_path).unwrap();
   let manifest_json: Value = serde_json::from_str(&manifest_content).unwrap();
 
-  assert!(manifest_json["components"].get("py-gen-e2e").is_none());
+  assert!(manifest_json["components"].get("py-gen-e2e").is_some());
   assert!(manifest_json["components"].get("python-e2e").is_some());
 }
 
