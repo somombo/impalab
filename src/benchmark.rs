@@ -172,7 +172,7 @@ async fn run_pipeline(
 
   // --- Configure Generator (if provided) ---
   if let Some(ResolvedGenerator {
-    name,
+    name: generator_name,
     seed,
     command_args: gen_command_args,
   }) = generator_cfg
@@ -190,7 +190,7 @@ async fn run_pipeline(
     }
 
     gen_cmd
-      .env("IMPALAB_COMPONENT_NAME", name)
+      .env("IMPALAB_COMPONENT_NAME", generator_name)
       .env("IMPALAB_SEED", seed.to_string())
       .env(
         "IMPALAB_ATTRIBUTES",
@@ -219,7 +219,7 @@ async fn run_pipeline(
 
     // Spawn task to log generator's stderr
     gen_stderr_handle = Some(tokio::spawn(
-      read_and_log_stderr(gen_stderr, ComponentType::Generator).instrument(
+      read_and_log_stderr(gen_stderr, generator_name.clone()).instrument(
         tracing::info_span!("stderr_handler", component_type = ?ComponentType::Generator),
       ),
     ));
@@ -258,7 +258,7 @@ async fn run_pipeline(
   );
 
   let exec_stderr_task = tokio::spawn(
-    read_and_log_stderr(exec_stderr, ComponentType::Executor)
+    read_and_log_stderr(exec_stderr, executor_name.clone())
       .instrument(tracing::info_span!("stderr_handler", component_type = ?ComponentType::Executor)),
   );
 
@@ -391,7 +391,7 @@ async fn process_executor_stdout<R: AsyncRead + Unpin>(
 /// Reads lines from a process's stderr and logs them.
 async fn read_and_log_stderr<R: AsyncRead + Unpin>(
   stream: R,
-  component_type: ComponentType,
+  component_name: String,
 ) -> Result<(), BenchmarkError> {
   let mut reader = BufReader::new(stream).lines();
 
@@ -399,11 +399,11 @@ async fn read_and_log_stderr<R: AsyncRead + Unpin>(
     .next_line()
     .await
     .map_err(|e| BenchmarkError::ReadStderr {
-      component_type: component_type.clone(),
+      component_name: component_name.clone(),
       source: e,
     })?
   {
-    tracing::warn!(component_type = ?component_type, "{}", line);
+    tracing::info!(component = %component_name, "{}", line);
   }
   Ok(())
 }
