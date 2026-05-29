@@ -22,7 +22,7 @@ class Impa:
 
     def _resolve_impa_executable(self, impa_path: Optional[str]) -> str:
         if impa_path:
-            abs_path = os.path.abspath(impa_path)
+            abs_path = os.path.abspath(impa_path.strip())
             if os.path.isfile(abs_path):
                 return abs_path
             if os.path.isdir(abs_path):
