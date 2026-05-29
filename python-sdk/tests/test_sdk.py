@@ -52,8 +52,8 @@ def temp_impa(tmp_path):
     root_dir.mkdir()
     manifest = "test_manifest.json"
     
-    # Create fake executable file to avoid download logic by default
-    impa_bin_dir = root_dir / "target" / "debug"
+    # Create fake executable file in .bin to avoid download logic by default
+    impa_bin_dir = root_dir / ".bin"
     impa_bin_dir.mkdir(parents=True)
     impa_bin = impa_bin_dir / ("impa.exe" if os.name == "nt" else "impa")
     impa_bin.touch()
@@ -61,7 +61,7 @@ def temp_impa(tmp_path):
     return Impa(
         root_dir=str(root_dir),
         manifest_filename=manifest,
-        impa_path=str(impa_bin_dir)
+        bin_dir=str(impa_bin_dir)
     )
 
 def test_impa_init_resolves_paths(temp_impa, tmp_path):
@@ -69,11 +69,13 @@ def test_impa_init_resolves_paths(temp_impa, tmp_path):
     assert temp_impa.manifest_filename == "test_manifest.json"
     
     exe_name = "impa.exe" if os.name == "nt" else "impa"
-    expected_exe = tmp_path / "project" / "target" / "debug" / exe_name
+    expected_exe = tmp_path / "project" / ".bin" / exe_name
     assert os.path.abspath(temp_impa.impa_executable) == os.path.abspath(expected_exe)
 
 @mock.patch("urllib.request.urlopen")
-def test_ensure_executable_downloads_when_missing(mock_urlopen, tmp_path):
+@mock.patch("shutil.which", return_value=None)
+@mock.patch.dict(os.environ, {}, clear=True)
+def test_ensure_executable_downloads_when_missing(mock_which, mock_urlopen, tmp_path):
     mock_response = mock.MagicMock()
     mock_response.__enter__.return_value = mock_response
     mock_response.read.side_effect = [b"binary_content", b""]
@@ -82,7 +84,7 @@ def test_ensure_executable_downloads_when_missing(mock_urlopen, tmp_path):
     impa = Impa(
         root_dir=str(tmp_path),
         manifest_filename="manifest.json",
-        impa_path=str(tmp_path / "missing_impa")
+        bin_dir=None
     )
     
     resolved = impa._ensure_executable()
@@ -90,6 +92,9 @@ def test_ensure_executable_downloads_when_missing(mock_urlopen, tmp_path):
     mock_urlopen.assert_called_once()
     
     assert os.path.isfile(impa.impa_executable)
+    exe_name = "impa.exe" if os.name == "nt" else "impa"
+    expected_exe = tmp_path / ".bin" / exe_name
+    assert os.path.abspath(impa.impa_executable) == os.path.abspath(expected_exe)
     with open(impa.impa_executable, "rb") as f:
         assert f.read() == b"binary_content"
         
@@ -361,4 +366,98 @@ def test_run_tqdm_graceful_fallback(mock_popen, temp_impa):
         # This should execute successfully without raising ImportError
         results = temp_impa.run(**config_dict)
         assert len(results) == 1
+
+def test_bin_dir_validation_fails_when_missing(tmp_path):
+    missing_dir = tmp_path / "does_not_exist"
+    with pytest.raises(RuntimeError, match="bin_dir is set, but no impa.* executable was found"):
+        Impa(root_dir=str(tmp_path), bin_dir=str(missing_dir))
+
+def test_bin_dir_validation_fails_when_file(tmp_path):
+    dummy_file = tmp_path / "dummy_file"
+    dummy_file.touch()
+    with pytest.raises(RuntimeError, match="bin_dir is set, but no impa.* executable was found"):
+        Impa(root_dir=str(tmp_path), bin_dir=str(dummy_file))
+
+def test_impa_bin_dir_env_var_resolves(tmp_path):
+    env_dir = tmp_path / "env_bin"
+    env_dir.mkdir()
+    exe_name = "impa.exe" if os.name == "nt" else "impa"
+    exe_file = env_dir / exe_name
+    exe_file.touch()
+
+    with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(env_dir)}):
+        impa = Impa(root_dir=str(tmp_path), bin_dir=None)
+        assert os.path.abspath(impa.impa_executable) == os.path.abspath(str(exe_file))
+
+def test_impa_bin_dir_env_var_validation_fails_when_missing(tmp_path):
+    missing_dir = tmp_path / "does_not_exist"
+    with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(missing_dir)}):
+        with pytest.raises(RuntimeError, match="IMPALAB_BIN_DIR environment variable is set, but no impa.* executable was found"):
+            Impa(root_dir=str(tmp_path), bin_dir=None)
+
+def test_impa_bin_dir_env_var_validation_fails_when_file(tmp_path):
+    dummy_file = tmp_path / "dummy_file"
+    dummy_file.touch()
+    with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(dummy_file)}):
+        with pytest.raises(RuntimeError, match="IMPALAB_BIN_DIR environment variable is set, but no impa.* executable was found"):
+            Impa(root_dir=str(tmp_path), bin_dir=None)
+
+def test_precedence_order(tmp_path):
+    # Setup directories
+    root_dir = tmp_path / "root"
+    root_dir.mkdir()
+
+    bin_dir = tmp_path / "bin_dir_param"
+    bin_dir.mkdir()
+
+    local_dir = root_dir / ".bin"
+    local_dir.mkdir()
+
+    env_dir = tmp_path / "env_dir"
+    env_dir.mkdir()
+
+    exe_name = "impa.exe" if os.name == "nt" else "impa"
+
+    # Create dummy files
+    bin_exe = bin_dir / exe_name
+    bin_exe.touch()
+
+    local_exe = local_dir / exe_name
+    local_exe.touch()
+
+    env_exe = env_dir / exe_name
+    env_exe.touch()
+
+    # Precedence Case A: bin_dir parameter has priority over everything
+    with mock.patch("shutil.which", return_value="/usr/bin/impa"):
+        with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(env_dir)}):
+            impa = Impa(root_dir=str(root_dir), bin_dir=str(bin_dir))
+            assert os.path.abspath(impa.impa_executable) == os.path.abspath(str(bin_exe))
+
+    # Precedence Case B: Local target .bin has priority over system PATH, env var, and default fallback
+    with mock.patch("shutil.which", return_value="/usr/bin/impa"):
+        with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(env_dir)}):
+            impa = Impa(root_dir=str(root_dir), bin_dir=None)
+            assert os.path.abspath(impa.impa_executable) == os.path.abspath(str(local_exe))
+
+    # Precedence Case C: System PATH has priority over IMPALAB_BIN_DIR and default fallback
+    # Remove local target to check next precedence
+    local_exe.unlink()
+    with mock.patch("shutil.which", return_value="/usr/bin/impa") as mock_which:
+        with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(env_dir)}):
+            impa = Impa(root_dir=str(root_dir), bin_dir=None)
+            assert impa.impa_executable == "/usr/bin/impa"
+            mock_which.assert_called_once_with("impa")
+
+    # Precedence Case D: IMPALAB_BIN_DIR has priority over default fallback
+    with mock.patch("shutil.which", return_value=None):
+        with mock.patch.dict(os.environ, {"IMPALAB_BIN_DIR": str(env_dir)}):
+            impa = Impa(root_dir=str(root_dir), bin_dir=None)
+            assert os.path.abspath(impa.impa_executable) == os.path.abspath(str(env_exe))
+
+    # Precedence Case E: Default fallback (which resolves to local target .bin path)
+    with mock.patch("shutil.which", return_value=None):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            impa = Impa(root_dir=str(root_dir), bin_dir=None)
+            assert os.path.abspath(impa.impa_executable) == os.path.abspath(str(local_dir / exe_name))
 
