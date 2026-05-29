@@ -22,10 +22,15 @@ pip install "impalab-py[data]"
 from impalab_py import Impa, LabFromResults
 
 # Initialize the orchestrator
+# By default, Impa resolves the executable by checking (in order):
+# 1. The `bin_dir` parameter
+# 2. The local `.bin` directory
+# 3. System `PATH`
+# 4. The `IMPALAB_BIN_DIR` environment variable
 impa = Impa(
     root_dir="..",
     manifest_filename="impa_manifest.json",
-    impa_path="../target/debug"
+    bin_dir="../.bin"
 )
 
 # Build components

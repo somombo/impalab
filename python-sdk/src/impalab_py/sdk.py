@@ -12,39 +12,43 @@ class Impa:
         self,
         root_dir: str = ".",
         manifest_filename: str = "impa_manifest.json",
-        impa_path: Optional[str] = None,
+        bin_dir: Optional[str] = None,
         impa_version_tag: str = "test_release",
     ):
         self.root_dir = os.path.abspath(root_dir)
         self.manifest_filename = manifest_filename
         self.impa_version_tag = impa_version_tag
-        self.impa_executable = self._resolve_impa_executable(impa_path)
+        self.impa_executable = self._resolve_impa_executable(bin_dir)
+        print(f"Proposed path to `impa` executable: '{self.impa_executable}'", file=sys.stderr)
 
-    def _resolve_impa_executable(self, impa_path: Optional[str]) -> str:
-        if impa_path:
-            abs_path = os.path.abspath(impa_path.strip())
-            if os.path.isfile(abs_path):
-                return abs_path
-            if os.path.isdir(abs_path):
-                exe_name = "impa.exe" if os.name == "nt" else "impa"
-                candidate = os.path.join(abs_path, exe_name)
-                if os.path.isfile(candidate):
-                    return candidate
-                return candidate
-            return abs_path
+
+    def _resolve_impa_executable(self, bin_dir: Optional[str]) -> str:
+        exe_name = "impa.exe" if os.name == "nt" else "impa"
+
+        if bin_dir:
+            abs_path = os.path.abspath(bin_dir.strip())
+            candidate = os.path.join(abs_path, exe_name)
+            if not os.path.isfile(candidate):
+                raise RuntimeError(f"bin_dir is set, but no {exe_name} executable was found at '{candidate}'")
+            return candidate
+
+        local_candidate = os.path.join(self.root_dir, ".bin", exe_name)
+        if os.path.isfile(local_candidate):
+            return local_candidate
 
         in_path = shutil.which("impa")
         if in_path:
             return in_path
 
-        for sub in [os.path.join("target", "debug"), os.path.join("target", "release")]:
-            exe_name = "impa.exe" if os.name == "nt" else "impa"
-            candidate = os.path.join(self.root_dir, sub, exe_name)
-            if os.path.isfile(candidate):
-                return candidate
+        env_val = os.environ.get("IMPALAB_BIN_DIR")
+        if env_val is not None:
+            abs_path = os.path.abspath(env_val.strip())
+            candidate = os.path.join(abs_path, exe_name)
+            if not os.path.isfile(candidate):
+                raise RuntimeError(f"IMPALAB_BIN_DIR environment variable is set, but no {exe_name} executable was found at '{candidate}'")
+            return candidate
 
-        exe_name = "impa.exe" if os.name == "nt" else "impa"
-        return os.path.join(self.root_dir, exe_name)
+        return os.path.join(self.root_dir, ".bin", exe_name)
 
     def _ensure_executable(self) -> str:
         if os.path.isfile(self.impa_executable):
@@ -55,11 +59,14 @@ class Impa:
 
         print(f"'impa' executable not found. Downloading version '{self.impa_version_tag}' from GitHub...", file=sys.stderr)
         
+        exe_name = "impa.exe" if os.name == "nt" else "impa"
+        download_path = os.path.join(self.root_dir, ".bin", exe_name)
+
         url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa"
         if os.name == "nt":
             url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa.exe"
             
-        parent_dir = os.path.dirname(self.impa_executable)
+        parent_dir = os.path.dirname(download_path)
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
             
@@ -69,13 +76,14 @@ class Impa:
                 url, 
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             )
-            with urllib.request.urlopen(req) as response, open(self.impa_executable, "wb") as out_file:
+            with urllib.request.urlopen(req) as response, open(download_path, "wb") as out_file:
                 shutil.copyfileobj(response, out_file)
             
             if os.name != "nt":
-                st = os.stat(self.impa_executable)
-                os.chmod(self.impa_executable, st.st_mode | stat.S_IEXEC)
+                st = os.stat(download_path)
+                os.chmod(download_path, st.st_mode | stat.S_IEXEC)
             
+            self.impa_executable = download_path
             print(f"Downloaded 'impa' successfully to {self.impa_executable}", file=sys.stderr)
         except Exception as e:
             raise RuntimeError(f"Failed to download 'impa' from {url}: {e}") from e
