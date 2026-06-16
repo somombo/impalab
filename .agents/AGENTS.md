@@ -1,0 +1,3 @@
+- Use the included `documenting-impalab` and `testing-impalab` skills for documentation and tests.
+- Limit inline comments to non-obvious intent or complexity e.g. it should never never explain syntax via comments. 
+- Prefer to make changes that are as easy as possible for human to review e.g by inspecting git diff.

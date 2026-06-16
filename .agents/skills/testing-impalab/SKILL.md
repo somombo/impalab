@@ -40,6 +40,14 @@ Test the logic that interprets results from external workers:
 ### 3. Dependency Graphing
 * **Component Discovery**: Test the logic that maps relative paths and identifies available workers within a project structure.
 
+### 4. Running Tests
+
+  Double check the project is in a valid state with:
+
+  ```
+  cargo check --all-targets && cargo test && cargo clippy --all-targets -- -D warnings && cargo +nightly fmt --all --check
+  ```
+
 ## Skill Standards
 * **Declarative Intent**: Focus on *what* should be verified (e.g., "verify precedence") rather than specific variable names.
 * **Failure Clarity**: When adding tests, ensure they provide enough context (e.g., through log levels or descriptive assertions) to identify which layer of the system failed.
