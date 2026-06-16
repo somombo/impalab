@@ -17,6 +17,7 @@ use crate::error::BenchmarkError;
 use crate::manifest::CommandArgs;
 use crate::manifest::ComponentType;
 use serde::Serialize;
+
 use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
@@ -31,10 +32,12 @@ struct BenchmarkMeta {
 
   executor: String,
 
-  #[serde(rename = "args")]
+  #[serde(rename = "args", skip_serializing_if = "Vec::is_empty")]
   task_args: Vec<String>,
 
   rep_index: usize,
+  #[serde(skip_serializing_if = "serde_json::Map::is_empty")]
+  attributes: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Main benchmark runner.
@@ -129,6 +132,7 @@ async fn run_pipeline(
       executor: executor_name,
       args: task_args,
       command_args,
+      effective_attributes,
       effective_reps: _,
     },
   ): (usize, &ResolvedTask),
@@ -221,6 +225,7 @@ async fn run_pipeline(
     executor: executor_name.clone(),
     task_args: task_args.clone(),
     rep_index,
+    attributes: effective_attributes.clone(),
   };
   let stdout_task = tokio::spawn(
     async move { process_executor_stdout(exec_stdout, &meta).await }

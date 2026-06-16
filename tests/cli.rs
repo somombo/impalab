@@ -319,7 +319,7 @@ fn test_build_with_filters() {
 }
 
 #[test]
-fn test_reps_e2e() {
+fn test_reps_and_attributes_e2e() {
   // Setup: Create temp dir and copy fixtures
   let temp = tempdir().unwrap();
   let components_dir = temp.path().join("components");
@@ -348,8 +348,9 @@ fn test_reps_e2e() {
   // --- Test `impa run` ---
   let config_str = r#"{
     "reps": 2,
+    "attributes": {"global": "foo", "threads": 8},
     "tasks": [
-      {"executor": "python-e2e", "args": ["test_func_1"], "reps": 1}
+      {"executor": "python-e2e", "args": ["test_func_1"], "reps": 1, "attributes": {"task": "bar", "simd": true}}
     ]
   }"#;
 
@@ -371,11 +372,15 @@ fn test_reps_e2e() {
 
   // Assert run success and check the JSONL output
   // Task has reps: 1, so it should only run once (rep_index: 0)
-
+  // Attributes should be merged: {"global": "foo", "threads": 8, "task": "bar", "simd": true}
   run_cmd
     .assert()
     .success()
     .stdout(predicate::str::contains(r#""rep_index":0"#))
+    .stdout(predicate::str::contains(r#""global":"foo""#))
+    .stdout(predicate::str::contains(r#""threads":8"#))
+    .stdout(predicate::str::contains(r#""task":"bar""#))
+    .stdout(predicate::str::contains(r#""simd":true"#))
     .stdout(predicate::str::contains(r#""rep_index":1"#).not());
 
   // Test with global reps
