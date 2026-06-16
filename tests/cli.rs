@@ -157,10 +157,10 @@ fn test_build_and_run_e2e() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","duration":12}"#)
     );
 }
 
@@ -242,10 +242,10 @@ fn test_build_and_run_e2e_stdin_config() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"data_id":"test_case_1","duration":1234}"#)
+      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_id":"test_case_1","duration":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"data_id":"test_case_1","duration":12}"#)
+      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_id":"test_case_1","duration":12}"#)
     );
 }
 
@@ -316,4 +316,95 @@ fn test_build_with_filters() {
 
   assert!(manifest_json["components"].get("py-gen-e2e").is_some());
   assert!(manifest_json["components"].get("python-e2e").is_some());
+}
+
+#[test]
+fn test_reps_e2e() {
+  // Setup: Create temp dir and copy fixtures
+  let temp = tempdir().unwrap();
+  let components_dir = temp.path().join("components");
+  fs::create_dir_all(&components_dir).unwrap();
+
+  // Copy our ./tests/fixtures dir into the temp components_dir
+  let options = CopyOptions::new();
+  copy("tests/fixtures", temp.path(), &options).unwrap();
+  fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
+
+  // --- Test `impa build` ---
+  let mut build_cmd = Command::new(cargo::cargo_bin!("impa"));
+  build_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
+    .env("RUST_LOG", "info")
+    .env("NO_COLOR", "1");
+
+  build_cmd.assert().success();
+
+  // --- Test `impa run` ---
+  let config_str = r#"{
+    "reps": 2,
+    "tasks": [
+      {"executor": "python-e2e", "args": ["test_func_1"], "reps": 1}
+    ]
+  }"#;
+
+  let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
+  run_cmd
+    .arg("run")
+    .arg("--set")
+    .arg("generator.name=py-gen-e2e")
+    .arg("--set")
+    .arg("generator.seed=42")
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
+    .arg("--config")
+    .arg("-")
+    .env("NO_COLOR", "1")
+    .write_stdin(config_str);
+
+  // Assert run success and check the JSONL output
+  // Task has reps: 1, so it should only run once (rep_index: 0)
+
+  run_cmd
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(r#""rep_index":0"#))
+    .stdout(predicate::str::contains(r#""rep_index":1"#).not());
+
+  // Test with global reps
+  let config_str_2 = r#"{
+    "reps": 2,
+    "tasks": [
+      {"executor": "python-e2e", "args": ["test_func_1"]}
+    ]
+  }"#;
+
+  let mut run_cmd_2 = Command::new(cargo::cargo_bin!("impa"));
+  run_cmd_2
+    .arg("run")
+    .arg("--set")
+    .arg("generator.name=py-gen-e2e")
+    .arg("--set")
+    .arg("generator.seed=42")
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("e2e_manifest.json")
+    .arg("--config")
+    .arg("-")
+    .env("NO_COLOR", "1")
+    .write_stdin(config_str_2);
+
+  run_cmd_2
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(r#""rep_index":0"#))
+    .stdout(predicate::str::contains(r#""rep_index":1"#));
 }

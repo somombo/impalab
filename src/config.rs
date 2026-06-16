@@ -32,6 +32,7 @@ struct RawConfig {
   tasks: Option<Vec<Task>>,
   #[serde(default)]
   components: HashMap<String, ManifestComponent>,
+  reps: Option<usize>,
 }
 
 impl RawConfig {
@@ -97,10 +98,23 @@ impl RawConfig {
         match self.resolve_component(&task.executor_name, ComponentType::Executor, root_dir) {
           Ok(mut cmp) => {
             cmp.run.args.extend(task.args.clone());
+
+            let effective_reps = task.reps.or(self.reps).unwrap_or(1);
+
+            if effective_reps == 0 {
+              tracing::warn!(
+                "Task with executor '{}' has 0 reps.. Skipping its execution",
+                task.executor_name
+              );
+              continue;
+            }
+
             resolved_tasks.push(ResolvedTask {
               executor: task.executor_name.clone(),
               args: task.args.clone(),
-              command: cmp.run,
+              command_args: cmp.run,
+
+              effective_reps,
             });
           }
           Err(e) => errors.push(e),
@@ -126,13 +140,16 @@ pub struct Task {
 
   #[serde(default)]
   pub args: Vec<String>,
+
+  pub reps: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTask {
   pub executor: String,
   pub args: Vec<String>,
-  pub command: CommandArgs,
+  pub command_args: CommandArgs,
+  pub effective_reps: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -448,6 +465,7 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "my-exec".to_string(),
         args: vec!["run-this".to_string()],
+        reps: None,
       }]),
       components: {
         let mut map = HashMap::new();
@@ -475,12 +493,16 @@ mod tests {
         );
         map
       },
+      ..Default::default()
     };
 
     let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
     assert!(resolved.generator.is_some());
     assert_eq!(resolved.tasks.len(), 1);
-    assert_eq!(resolved.tasks[0].command.args, vec!["base-arg", "run-this"]);
+    assert_eq!(
+      resolved.tasks[0].command_args.args,
+      vec!["base-arg", "run-this"]
+    );
   }
 
   #[test]
@@ -490,8 +512,10 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "missing-exec".to_string(),
         args: vec![],
+        reps: None,
       }]),
       components: HashMap::new(),
+      ..Default::default()
     };
 
     let res = raw.resolve_all(std::path::Path::new("."));
@@ -523,8 +547,10 @@ mod tests {
       tasks: Some(vec![Task {
         executor_name: "not-an-executor".to_string(),
         args: vec![],
+        reps: None,
       }]),
       components,
+      ..Default::default()
     };
 
     let res = raw.resolve_all(std::path::Path::new("."));
@@ -537,5 +563,105 @@ mod tests {
       }
       _ => panic!("Expected GraphValidationFailed with IncorrectComponentType"),
     }
+  }
+
+  #[test]
+  fn test_raw_config_resolve_reps_fallback() {
+    let mut components = HashMap::new();
+    components.insert(
+      "exec".to_string(),
+      ManifestComponent {
+        component_type: ComponentType::Executor,
+        run: CommandArgs {
+          command: PathBuf::from("bin"),
+          args: vec![],
+          working_dir: None,
+        },
+      },
+    );
+
+    // Task reps override global reps
+    let raw = RawConfig {
+      reps: Some(5),
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        reps: Some(10),
+      }]),
+      components: components.clone(),
+      ..Default::default()
+    };
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    assert_eq!(resolved.tasks[0].effective_reps, 10);
+
+    // Global reps fallback
+    let raw = RawConfig {
+      reps: Some(5),
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        reps: None,
+      }]),
+      components: components.clone(),
+      ..Default::default()
+    };
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    assert_eq!(resolved.tasks[0].effective_reps, 5);
+
+    // Default to 1
+    let raw = RawConfig {
+      reps: None,
+      tasks: Some(vec![Task {
+        executor_name: "exec".to_string(),
+        args: vec![],
+        reps: None,
+      }]),
+      components: components.clone(),
+      ..Default::default()
+    };
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+    assert_eq!(resolved.tasks[0].effective_reps, 1);
+  }
+
+  #[test]
+  fn test_resolve_reps() {
+    let mut components = HashMap::new();
+    components.insert(
+      "my-exec".to_string(),
+      ManifestComponent {
+        component_type: ComponentType::Executor,
+        run: CommandArgs {
+          command: PathBuf::from("exec"),
+          args: vec![],
+          working_dir: None,
+        },
+      },
+    );
+
+    let raw = RawConfig {
+      generator: None,
+      reps: Some(5),
+      tasks: Some(vec![
+        Task {
+          executor_name: "my-exec".to_string(),
+          args: vec![],
+          reps: None,
+        },
+        Task {
+          executor_name: "my-exec".to_string(),
+          args: vec![],
+          reps: Some(10),
+        },
+      ]),
+      components,
+    };
+
+    let resolved = raw.resolve_all(std::path::Path::new(".")).unwrap();
+
+    // Task 0 inherits global reps
+    assert_eq!(resolved.tasks[0].effective_reps, 5);
+
+    // Task 1 overrides global reps
+    assert_eq!(resolved.tasks[1].effective_reps, 10);
   }
 }
