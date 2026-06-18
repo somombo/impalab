@@ -13,11 +13,9 @@ class Impa:
         root_dir: str = ".",
         manifest_filename: str = "impa_manifest.json",
         bin_dir: Optional[str] = None,
-        impa_version_tag: str = "v0.5.0",
     ):
         self.root_dir = os.path.abspath(root_dir)
         self.manifest_filename = manifest_filename
-        self.impa_version_tag = impa_version_tag
         self.impa_executable = self._resolve_impa_executable(bin_dir)
         print(f"Proposed path to `impa` executable: '{self.impa_executable}'", file=sys.stderr)
 
@@ -57,14 +55,20 @@ class Impa:
                 os.chmod(self.impa_executable, st.st_mode | stat.S_IEXEC)
             return self.impa_executable
 
-        print(f"'impa' executable not found. Downloading version '{self.impa_version_tag}' from GitHub...", file=sys.stderr)
+        raise FileNotFoundError(f"'impa' executable not found at '{self.impa_executable}'. Please call `download_executable()` to install it.")
+
+    def download_executable(self, version_tag: str = "v0.5.1", target: Optional[str] = None) -> str:
+        print(f"Downloading 'impa' version '{version_tag}' from GitHub...", file=sys.stderr)
         
         exe_name = "impa.exe" if os.name == "nt" else "impa"
         download_path = os.path.join(self.root_dir, ".bin", exe_name)
 
-        url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa-linux-amd64"
-        if os.name == "nt":
-            url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa-windows-amd64.exe"
+        if target:
+            url = f"https://github.com/somombo/impalab/releases/download/{version_tag}/{target}"
+        else:
+            url = f"https://github.com/somombo/impalab/releases/download/{version_tag}/impa-linux-amd64"
+            if os.name == "nt":
+                url = f"https://github.com/somombo/impalab/releases/download/{version_tag}/impa-windows-amd64.exe"
             
         parent_dir = os.path.dirname(download_path)
         if parent_dir:

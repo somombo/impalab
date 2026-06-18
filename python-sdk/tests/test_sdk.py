@@ -75,7 +75,7 @@ def test_impa_init_resolves_paths(temp_impa, tmp_path):
 @mock.patch("urllib.request.urlopen")
 @mock.patch("shutil.which", return_value=None)
 @mock.patch.dict(os.environ, {}, clear=True)
-def test_ensure_executable_downloads_when_missing(mock_which, mock_urlopen, tmp_path):
+def test_download_executable_downloads_when_missing(mock_which, mock_urlopen, tmp_path):
     mock_response = mock.MagicMock()
     mock_response.__enter__.return_value = mock_response
     mock_response.read.side_effect = [b"binary_content", b""]
@@ -87,7 +87,7 @@ def test_ensure_executable_downloads_when_missing(mock_which, mock_urlopen, tmp_
         bin_dir=None
     )
     
-    resolved = impa._ensure_executable()
+    resolved = impa.download_executable()
     
     mock_urlopen.assert_called_once()
     
@@ -102,6 +102,18 @@ def test_ensure_executable_downloads_when_missing(mock_which, mock_urlopen, tmp_
         assert os.access(impa.impa_executable, os.X_OK)
         
     assert resolved == impa.impa_executable
+
+@mock.patch("shutil.which", return_value=None)
+@mock.patch.dict(os.environ, {}, clear=True)
+def test_ensure_executable_raises_error_when_missing(mock_which, tmp_path):
+    impa = Impa(
+        root_dir=str(tmp_path),
+        manifest_filename="manifest.json",
+        bin_dir=None
+    )
+    
+    with pytest.raises(FileNotFoundError, match="'impa' executable not found at"):
+        impa._ensure_executable()
 
 @mock.patch("subprocess.Popen")
 def test_build_invokes_command_with_correct_args(mock_popen, temp_impa):
