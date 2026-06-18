@@ -13,7 +13,7 @@ class Impa:
         root_dir: str = ".",
         manifest_filename: str = "impa_manifest.json",
         bin_dir: Optional[str] = None,
-        impa_version_tag: str = "test_release",
+        impa_version_tag: str = "v0.5.0",
     ):
         self.root_dir = os.path.abspath(root_dir)
         self.manifest_filename = manifest_filename
@@ -62,9 +62,9 @@ class Impa:
         exe_name = "impa.exe" if os.name == "nt" else "impa"
         download_path = os.path.join(self.root_dir, ".bin", exe_name)
 
-        url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa"
+        url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa-linux-amd64"
         if os.name == "nt":
-            url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa.exe"
+            url = f"https://github.com/somombo/impalab/releases/download/{self.impa_version_tag}/impa-windows-amd64.exe"
             
         parent_dir = os.path.dirname(download_path)
         if parent_dir:
