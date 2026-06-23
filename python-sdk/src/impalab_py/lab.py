@@ -1,33 +1,12 @@
 import json
-from typing import List, Dict, Any, Union, Optional
+import sys
+from typing import List, Dict, Any, Optional
+
+from . import jsonl
 
 class Lab:
-    def __init__(self, results: Union[str, List[Dict[str, Any]]]):
-        if isinstance(results, str):
-            results_stripped = results.strip()
-            if results_stripped.startswith("[") and results_stripped.endswith("]"):
-                try:
-                    self.results = json.loads(results_stripped)
-                except json.JSONDecodeError:
-                    self.results = self._parse_jsonl(results_stripped)
-            else:
-                self.results = self._parse_jsonl(results_stripped)
-        elif isinstance(results, list):
-            self.results = results
-        else:
-            raise TypeError("results must be a JSONL string or a list of dictionaries")
-
-    def _parse_jsonl(self, text: str) -> List[Dict[str, Any]]:
-        parsed = []
-        for line in text.splitlines():
-            line_stripped = line.strip()
-            if line_stripped:
-                try:
-                    parsed.append(json.loads(line_stripped))
-                except json.JSONDecodeError:
-                    # Ignore empty/malformed lines during raw parse
-                    continue
-        return parsed
+    def __init__(self, results: str):
+        self.results = jsonl.loads(results)
 
     def to_dataframe(self, flatten_attributes: bool = True, flatten_meta: bool = True):
         """Convert results to a pandas DataFrame."""

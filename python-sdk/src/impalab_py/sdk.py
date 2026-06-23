@@ -7,6 +7,8 @@ import shutil
 import stat
 from typing import List, Dict, Any, Optional
 
+from . import jsonl
+
 class Impa:
     def __init__(
         self,
@@ -146,7 +148,7 @@ class Impa:
             print(f"Error running build command: {e}", file=sys.stderr)
             return False
 
-    def run(self, pbar_total = 0, **config) -> List[Dict[str, Any]]:
+    def run(self, pbar_total = 0, **config) -> str:
         exe = self._ensure_executable()
         
         cmd = [exe, "run", "--root-dir", self.root_dir, "--config", "-"]
@@ -203,10 +205,7 @@ class Impa:
                 for line in process.stdout:
                     line_stripped = line.strip()
                     if line_stripped:
-                        try:
-                            results.append(json.loads(line_stripped))
-                        except json.JSONDecodeError:
-                            print(f"Warning: could not parse stdout line as JSON: {line_stripped}", file=sys.stderr)
+                        results.append(line_stripped)
                         if pbar is not None:
                             pbar.update(1)
                 
@@ -216,7 +215,7 @@ class Impa:
                 if process.returncode != 0:
                     raise RuntimeError(f"impa run failed with exit code {process.returncode}")
                     
-                return results
+                return jsonl.join(results)
             finally:
                 if pbar is not None:
                     pbar.close()
