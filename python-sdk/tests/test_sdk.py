@@ -3,7 +3,7 @@ import json
 import sys
 from unittest import mock
 import pytest
-from impalab_py import Impa, Lab, LabFromResults
+from impalab_py import Impa, Lab, LabFromResults, jsonl
 
 MOCK_RESULTS_JSONL = """
 {"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"cpu":"x86_64"},"data_token":"run_1","metric":450,"gen_meta":{"size":100},"exec_meta":{"iters":10}}
@@ -11,40 +11,7 @@ MOCK_RESULTS_JSONL = """
 {"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":1,"attributes":{"cpu":"x86_64"},"data_token":"run_2","metric":460,"gen_meta":{"size":100},"exec_meta":{"iters":12}}
 """
 
-MOCK_RESULTS_LIST = [
-    {
-        "task_index": 0,
-        "executor": "zig-executors",
-        "args": ["linear_search"],
-        "rep_index": 0,
-        "attributes": {"cpu": "x86_64"},
-        "data_token": "run_1",
-        "metric": 450,
-        "gen_meta": {"size": 100},
-        "exec_meta": {"iters": 10}
-    },
-    {
-        "task_index": 1,
-        "executor": "zig-executors",
-        "args": ["binary_search"],
-        "rep_index": 0,
-        "attributes": {"cpu": "x86_64"},
-        "data_token": "run_1",
-        "metric": 200,
-        "gen_meta": {"size": 100}
-    },
-    {
-        "task_index": 0,
-        "executor": "zig-executors",
-        "args": ["linear_search"],
-        "rep_index": 1,
-        "attributes": {"cpu": "x86_64"},
-        "data_token": "run_2",
-        "metric": 460,
-        "gen_meta": {"size": 100},
-        "exec_meta": {"iters": 12}
-    }
-]
+MOCK_RESULTS_LIST = jsonl.loads(MOCK_RESULTS_JSONL)
 
 @pytest.fixture
 def temp_impa(tmp_path):
@@ -166,6 +133,7 @@ def test_run_passes_config_via_stdin_and_collects_stdout(mock_popen, temp_impa):
     
     results = temp_impa.run(**config_dict)
     
+    results = jsonl.loads(results)
     assert len(results) == 2
     assert results[0]["executor"] == "test"
     assert results[0]["metric"] == 12.3
@@ -190,18 +158,14 @@ def test_lab_parsing():
     assert lab_jsonl.results[0]["executor"] == "zig-executors"
     assert lab_jsonl.results[1]["metric"] == 200
     
-    lab_list = Lab(MOCK_RESULTS_LIST)
-    assert len(lab_list.results) == 3
-    assert lab_list.results[2]["metric"] == 460
-    
-    lab_array = Lab(json.dumps(MOCK_RESULTS_LIST))
-    assert len(lab_array.results) == 3
-    
+    with pytest.raises(TypeError):
+        Lab(MOCK_RESULTS_LIST)
+        
     with pytest.raises(TypeError):
         Lab(123)
 
 def test_lab_dataframe_conversion():
-    lab = Lab(MOCK_RESULTS_LIST)
+    lab = Lab(MOCK_RESULTS_JSONL)
     
     try:
         import pandas as pd
@@ -244,6 +208,7 @@ def test_lab_dataframe_conversion_attributes_types():
             "attributes": {"string_attr": "goodbye", "numeric_attr": 100, "mixed_attr": 200},
         }
     ]
+    custom_results = jsonl.dumps(custom_results)
     lab = Lab(custom_results)
     df = lab.to_dataframe()
     
@@ -253,7 +218,7 @@ def test_lab_dataframe_conversion_attributes_types():
 
 
 def test_lab_summary_and_best():
-    lab = Lab(MOCK_RESULTS_LIST)
+    lab = Lab(MOCK_RESULTS_JSONL)
     
     summary = lab.summary()
     best = lab.best()
@@ -281,7 +246,7 @@ def test_lab_summary_and_best():
 
 def test_lab_summary_no_pandas_fallback():
     # Force summary to use manual fallback by hiding pandas
-    lab = Lab(MOCK_RESULTS_LIST)
+    lab = Lab(MOCK_RESULTS_JSONL)
     
     with mock.patch.dict("sys.modules", {"pandas": None}):
         summary = lab.summary()
@@ -377,6 +342,7 @@ def test_run_tqdm_graceful_fallback(mock_popen, temp_impa):
         }
         # This should execute successfully without raising ImportError
         results = temp_impa.run(**config_dict)
+        results = jsonl.loads(results)
         assert len(results) == 1
 
 def test_bin_dir_validation_fails_when_missing(tmp_path):
