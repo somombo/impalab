@@ -19,7 +19,6 @@ class Impa:
         self.root_dir = os.path.abspath(root_dir)
         self.manifest_filename = manifest_filename
         self.impa_executable = self._resolve_impa_executable(bin_dir)
-        print(f"Proposed path to `impa` executable: '{self.impa_executable}'", file=sys.stderr)
 
 
     def _resolve_impa_executable(self, bin_dir: Optional[str]) -> str:
@@ -148,7 +147,7 @@ class Impa:
             print(f"Error running build command: {e}", file=sys.stderr)
             return False
 
-    def run(self, pbar_total = 0, **config) -> str:
+    def run(self, pbar_total: Optional[int] = 0, **config) -> str:
         exe = self._ensure_executable()
         
         cmd = [exe, "run", "--root-dir", self.root_dir, "--config", "-"]
@@ -182,24 +181,25 @@ class Impa:
             results = []
 
             pbar = None
-            try:
-                is_jupyter = False
+            if pbar_total is not None:
                 try:
-                    from IPython import get_ipython
-                    ip = get_ipython()
-                    if ip is not None and ip.__class__.__name__ == 'ZMQInteractiveShell':
-                        is_jupyter = True
-                except (ImportError, NameError):
+                    is_jupyter = False
+                    try:
+                        from IPython import get_ipython
+                        ip = get_ipython()
+                        if ip is not None and ip.__class__.__name__ == 'ZMQInteractiveShell':
+                            is_jupyter = True
+                    except (ImportError, NameError):
+                        pass
+
+                    if is_jupyter:
+                        from tqdm.notebook import tqdm
+                    else:
+                        from tqdm import tqdm
+
+                    pbar = tqdm(total=pbar_total, desc="Running benchmarks")
+                except Exception:
                     pass
-
-                if is_jupyter:
-                    from tqdm.notebook import tqdm
-                else:
-                    from tqdm import tqdm
-
-                pbar = tqdm(total=pbar_total, desc="Running benchmarks")
-            except Exception:
-                pass
 
             try:
                 for line in process.stdout:
