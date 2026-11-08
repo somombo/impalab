@@ -1,5 +1,6 @@
 import os
 import json
+import subprocess
 import sys
 from unittest import mock
 import pytest
@@ -261,6 +262,16 @@ def test_lab_summary_no_pandas_fallback():
         assert summary[1]["count"] == 2
         
         assert best["task_label"] == "zig-executors binary_search"
+
+def test_package_imports_without_data_extra():
+    # A None entry in sys.modules makes any import of that package fail.
+    code = (
+        "import sys\n"
+        "for name in ('pandas', 'matplotlib', 'seaborn', 'plotly'):\n"
+        "    sys.modules[name] = None\n"
+        "import impalab_py\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 @mock.patch("subprocess.Popen")
 @mock.patch("tqdm.tqdm")

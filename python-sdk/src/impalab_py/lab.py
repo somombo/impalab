@@ -141,53 +141,5 @@ class Lab:
         else:
             return stats.iloc[0].to_dict() if not stats.empty else {}
 
-    def plot_distributions(self, metric_name: str = "metric", title: str = "Benchmark Results Distribution", ax=None):
-        """Plot box plots of the metrics for each task."""
-        try:
-            import matplotlib.pyplot as plt
-            import seaborn as sns
-        except ImportError as e:
-            raise ImportError(
-                "matplotlib and seaborn are required for plotting. "
-                "Install them using: pip install matplotlib seaborn"
-            ) from e
-
-        df = self.to_dataframe()
-        
-        if ax is None:
-            _, ax = plt.subplots(figsize=(10, 6))
-            
-        sns.boxplot(data=df, x="task_label", y=metric_name, ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel("Task")
-        ax.set_ylabel(metric_name)
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        return ax
-
-    def plot_bar(self, metric_name: str = "metric", title: str = "Average Benchmark Metrics", ax=None):
-        """Plot a bar chart of the average metric for each task."""
-        try:
-            import matplotlib.pyplot as plt
-            import seaborn as sns
-        except ImportError as e:
-            raise ImportError(
-                "matplotlib and seaborn are required for plotting. "
-                "Install them using: pip install matplotlib seaborn"
-            ) from e
-
-        df = self.to_dataframe()
-        
-        if ax is None:
-            _, ax = plt.subplots(figsize=(10, 6))
-            
-        sns.barplot(data=df, x="task_label", y=metric_name, errorbar="sd", ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel("Task")
-        ax.set_ylabel(f"Average {metric_name}")
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        return ax
-
 class LabFromResults(Lab):
     pass
