@@ -212,8 +212,8 @@ def test_best_of_reps_never_compares_rows_from_different_runs():
     assert dict(zip(best["run_id"], best["metric"])) == {RUN_ID: 5, OTHER_RUN_ID: 500}
 
 
-def before_run_id(*rows):
-    return [{key: value for key, value in row.items() if key != "run_id"} for row in rows]
+def before_run_id(*results):
+    return [{key: value for key, value in result.items() if key != "run_id"} for result in results]
 
 
 def test_best_of_reps_refuses_rows_without_a_run_id():
@@ -450,3 +450,62 @@ def test_plots_reject_an_empty_lab(plt):
         empty.plot_distributions()
     with pytest.raises(ValueError, match="no rows"):
         empty.plot_trends("gen.size")
+
+
+def runs_sharing_a_token():
+    # Both runs reuse the token case_1, as generators with simple tokens do.
+    small = jsonl.dumps([row(0, ["sort"], rep, "case_1", m) for rep, m in enumerate([5, 6])])
+    large = jsonl.dumps([row(0, ["sort"], rep, "case_1", m, run_id=OTHER_RUN_ID) for rep, m in enumerate([500, 600])])
+    return small, large
+
+
+def test_read_jsonl_gives_back_the_rows_that_were_saved(tmp_path):
+    path = tmp_path / "results.jsonl.gz"
+    jsonl.write(path, RESULTS)
+
+    lab = Lab.read_jsonl(path, metric_label="Duration (ns)")
+
+    pd.testing.assert_frame_equal(lab.df, Lab.from_jsonl(RESULTS).df)
+    assert lab.metric_label == "Duration (ns)"
+
+
+def test_read_jsonl_reads_a_glob_of_files_and_keeps_their_runs_apart(tmp_path):
+    small, large = runs_sharing_a_token()
+    jsonl.write(tmp_path / "study-small.jsonl", small)
+    jsonl.write(tmp_path / "study-large.jsonl.gz", large)
+
+    best = Lab.read_jsonl(str(tmp_path / "study-*")).best_of_reps().df
+
+    assert dict(zip(best["run_id"], best["metric"])) == {RUN_ID: 5, OTHER_RUN_ID: 500}
+
+
+def test_read_jsonl_keeps_runs_apart_within_one_file(tmp_path):
+    path = tmp_path / "study.jsonl"
+    jsonl.write(path, jsonl.join(list(runs_sharing_a_token())))
+
+    best = Lab.read_jsonl(path).best_of_reps().df
+
+    assert dict(zip(best["run_id"], best["metric"])) == {RUN_ID: 5, OTHER_RUN_ID: 500}
+
+
+def test_read_jsonl_accepts_a_list_of_paths(tmp_path):
+    paths = [tmp_path / "a.jsonl", tmp_path / "b.jsonl"]
+    jsonl.write(paths[0], RESULTS)
+    jsonl.write(paths[1], RESULTS.replace(RUN_ID, OTHER_RUN_ID))
+
+    lab = Lab.read_jsonl(paths)
+
+    assert lab.df["run_id"].value_counts().to_dict() == {RUN_ID: REP_COUNT, OTHER_RUN_ID: REP_COUNT}
+
+
+def test_read_jsonl_prefers_an_existing_file_over_a_glob_match(tmp_path):
+    jsonl.write(tmp_path / "results[1].jsonl", jsonl.dumps([row(0, ["literal"], 0, "case_1", 1)]))
+    jsonl.write(tmp_path / "results1.jsonl", jsonl.dumps([row(0, ["globbed"], 0, "case_1", 2)]))
+
+    for path in (tmp_path / "results[1].jsonl", str(tmp_path / "results[1].jsonl")):
+        assert list(Lab.read_jsonl(path).df["task_label"]) == ["zig literal"]
+
+
+def test_read_jsonl_raises_when_a_pattern_matches_nothing(tmp_path):
+    with pytest.raises(FileNotFoundError, match="no files match"):
+        Lab.read_jsonl(str(tmp_path / "missing-*.jsonl"))

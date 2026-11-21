@@ -111,6 +111,32 @@ print(both.summary(by="attr.experiment_name"))
 
 All the Labs must share the same `metric_label` and `lower_is_better`.
 
+## Saving and Loading Results
+
+`Impa.run` keeps results in memory and never writes to disk while benchmarks run. Once a run is over, save the string it returned with `jsonl.write`. Any later notebook can then load it without running `impa` again:
+
+```python
+from impalab_py import Lab, jsonl
+
+results = impa.run(...)
+jsonl.write("../data/study.jsonl", results)
+
+# Later, possibly in another notebook
+raw = Lab.read_jsonl("../data/study.jsonl", metric_label="Duration (ns)")
+```
+
+`jsonl.write` saves the text exactly as `impa` printed it. It creates missing folders, replaces an existing file, and compresses the file with gzip when the path ends in `.gz`. It also waits until the data is on disk before it returns. Otherwise the operating system could still be writing the file in the background while your next run takes its measurements. If saving fails, the previous file stays as it was. If only the final sync of the folder fails, it warns instead of raising, because the new file is already saved.
+
+Every row carries its `run_id`, so one file can hold any number of runs. Save each run right after it returns, or all of them together at the end of the notebook:
+
+```python
+jsonl.write("../data/study.jsonl", jsonl.join([results1, results2]))
+```
+
+To add a run to a file you saved before, join it with what the file already holds: `jsonl.write(path, jsonl.join([jsonl.read(path), results]))`.
+
+`Lab.read_jsonl` takes a file path, a URL, a glob pattern such as `"../data/study-*.jsonl"`, or a list of them, and reads gzip-compressed files too. A path that exists is read as is, even if its name contains glob characters such as `[`.
+
 ## Development
 
 Run the full test suite from this directory with the `dev` and `data` extras:

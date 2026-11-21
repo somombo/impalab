@@ -7,7 +7,9 @@ changes the Lab it is called on, and every transform returns a new Lab.
 
 from __future__ import annotations
 
+import glob
 import json
+import os
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Self
@@ -217,6 +219,41 @@ class Lab:
             _records_to_frame(jsonl.loads(text)),
             metric_label=metric_label,
             lower_is_better=lower_is_better,
+        )
+
+    @classmethod
+    def read_jsonl(
+        cls,
+        paths: str | os.PathLike | Sequence[str | os.PathLike],
+        *,
+        metric_label: str = "Metric",
+        lower_is_better: bool = True,
+    ) -> Self:
+        """Build a Lab from JSONL files, such as those saved with ``jsonl.write``.
+
+        ``paths`` is a file path, an ``http(s)://`` URL, a glob pattern such as
+        ``"data/study-*.jsonl"``, or a list of them. A path that exists is read
+        as is, even if it contains glob characters. Gzip-compressed files are
+        read too. A file may hold any number of runs, since every row carries
+        its ``run_id``.
+        """
+        sources = []
+        for path in [paths] if isinstance(paths, (str, os.PathLike)) else paths:
+            path = os.fspath(path)
+            is_pattern = any(c in path for c in "*?[")
+            if is_pattern and not path.startswith(("http://", "https://")) and not os.path.exists(path):
+                matches = sorted(glob.glob(path))
+                if not matches:
+                    raise FileNotFoundError(f"no files match {path!r}")
+                sources.extend(matches)
+            else:
+                sources.append(path)
+        if not sources:
+            raise ValueError("read_jsonl needs at least one path")
+
+        return cls.concat(
+            cls.from_jsonl(jsonl.read(source), metric_label=metric_label, lower_is_better=lower_is_better)
+            for source in sources
         )
 
     @classmethod
