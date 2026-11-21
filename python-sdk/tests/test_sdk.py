@@ -4,15 +4,7 @@ import subprocess
 import sys
 from unittest import mock
 import pytest
-from impalab_py import Impa, Lab, LabFromResults, jsonl
-
-MOCK_RESULTS_JSONL = """
-{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"cpu":"x86_64"},"data_token":"run_1","metric":450,"gen_meta":{"size":100},"exec_meta":{"iters":10}}
-{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"cpu":"x86_64"},"data_token":"run_1","metric":200,"gen_meta":{"size":100}}
-{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":1,"attributes":{"cpu":"x86_64"},"data_token":"run_2","metric":460,"gen_meta":{"size":100},"exec_meta":{"iters":12}}
-"""
-
-MOCK_RESULTS_LIST = jsonl.loads(MOCK_RESULTS_JSONL)
+from impalab_py import Impa, jsonl
 
 @pytest.fixture
 def temp_impa(tmp_path):
@@ -169,116 +161,6 @@ def test_run_passes_config_via_stdin_and_collects_stdout(mock_popen, temp_impa):
     written_data = mock_process.stdin.write.call_args[0][0]
     parsed_written_data = json.loads(written_data)
     assert parsed_written_data["generator"]["name"] == "test-gen"
-
-def test_lab_parsing():
-    lab_jsonl = Lab(MOCK_RESULTS_JSONL)
-    assert len(lab_jsonl.results) == 3
-    assert lab_jsonl.results[0]["executor"] == "zig-executors"
-    assert lab_jsonl.results[1]["metric"] == 200
-    
-    with pytest.raises(TypeError):
-        Lab(MOCK_RESULTS_LIST)
-        
-    with pytest.raises(TypeError):
-        Lab(123)
-
-def test_lab_dataframe_conversion():
-    lab = Lab(MOCK_RESULTS_JSONL)
-    
-    try:
-        import pandas as pd
-        has_pandas = True
-    except ImportError:
-        has_pandas = False
-        
-    if has_pandas:
-        df = lab.to_dataframe()
-        assert isinstance(df, pd.DataFrame)
-        assert len(df) == 3
-        assert df["task_label"].iloc[0] == "zig-executors linear_search"
-        assert df["task_label"].iloc[1] == "zig-executors binary_search"
-        assert df["attr.cpu"].iloc[0] == "x86_64"
-        assert df["attr.cpu"].dtype == "category"
-        assert df["gen.size"].iloc[0] == 100
-        assert df["exec.iters"].iloc[0] == 10
-        assert pd.isna(df["exec.iters"].iloc[1]) # binary_search doesn't have exec_meta
-    else:
-        with pytest.raises(ImportError):
-            lab.to_dataframe()
-
-def test_lab_dataframe_conversion_attributes_types():
-    try:
-        import pandas as pd
-        has_pandas = True
-    except ImportError:
-        has_pandas = False
-        
-    if not has_pandas:
-        return
-        
-    custom_results = [
-        {
-            "executor": "test",
-            "attributes": {"string_attr": "hello", "numeric_attr": 42, "mixed_attr": "world"},
-        },
-        {
-            "executor": "test",
-            "attributes": {"string_attr": "goodbye", "numeric_attr": 100, "mixed_attr": 200},
-        }
-    ]
-    custom_results = jsonl.dumps(custom_results)
-    lab = Lab(custom_results)
-    df = lab.to_dataframe()
-    
-    assert df["attr.string_attr"].dtype == "category"
-    assert df["attr.mixed_attr"].dtype == "category"  # has at least one string value
-    assert df["attr.numeric_attr"].dtype != "category"  # only numeric values, not a category
-
-
-def test_lab_summary_and_best():
-    lab = Lab(MOCK_RESULTS_JSONL)
-    
-    summary = lab.summary()
-    best = lab.best()
-    
-    if isinstance(summary, list):
-        assert len(summary) == 2
-        # sorted by mean: binary_search (mean 200) then linear_search (mean 455)
-        assert summary[0]["task_label"] == "zig-executors binary_search"
-        assert summary[0]["mean"] == 200.0
-        assert summary[1]["task_label"] == "zig-executors linear_search"
-        assert summary[1]["mean"] == 455.0 # (450 + 460) / 2
-        assert summary[1]["count"] == 2
-        
-        assert best["task_label"] == "zig-executors binary_search"
-    else:
-        assert len(summary) == 2
-        assert summary["task_label"].iloc[0] == "zig-executors binary_search"
-        assert summary["mean"].iloc[0] == 200.0
-        assert summary["task_label"].iloc[1] == "zig-executors linear_search"
-        assert summary["mean"].iloc[1] == 455.0
-        assert summary["count"].iloc[1] == 2
-        
-        assert best["task_label"] == "zig-executors binary_search"
-        assert best["mean"] == 200.0
-
-def test_lab_summary_no_pandas_fallback():
-    # Force summary to use manual fallback by hiding pandas
-    lab = Lab(MOCK_RESULTS_JSONL)
-    
-    with mock.patch.dict("sys.modules", {"pandas": None}):
-        summary = lab.summary()
-        best = lab.best()
-        
-        assert isinstance(summary, list)
-        assert len(summary) == 2
-        assert summary[0]["task_label"] == "zig-executors binary_search"
-        assert summary[0]["mean"] == 200.0
-        assert summary[1]["task_label"] == "zig-executors linear_search"
-        assert summary[1]["mean"] == 455.0
-        assert summary[1]["count"] == 2
-        
-        assert best["task_label"] == "zig-executors binary_search"
 
 def test_package_imports_without_data_extra():
     # A None entry in sys.modules makes any import of that package fail.

@@ -25,7 +25,7 @@ pip install "impalab-py[notebook]"
 ## Quick Start
 
 ```python
-from impalab_py import Impa, LabFromResults
+from impalab_py import Impa, Lab
 
 # Initialize the orchestrator
 # By default, Impa resolves the executable by checking (in order):
@@ -56,37 +56,60 @@ results = impa.run(
     ]
 )
 
-# Analyze results with Pandas
-lab = LabFromResults(results)
-df = lab.to_dataframe()
-print(lab.summary())
+# Analyze results with pandas
+lab = Lab.from_jsonl(results, metric_label="Duration (ns)")
+print(lab.best_of_reps().summary())
 ```
 
-## Exploring Results
+## Analyzing Results
 
-`Explorer` compares tasks across a generator parameter, such as the input size. It keeps two dataframes:
+`Lab` holds results as a pandas dataframe, `lab.df`, with one row per result that `impa` printed. Attributes, generator metadata and executor metadata are flattened into `attr.*`, `gen.*` and `exec.*` columns. A Lab also knows what its metric means: `metric_label` names it on plot axes, and `lower_is_better` says which end of it is best.
 
-- `raw_df` is `Lab.to_dataframe()` unchanged, with one row per rep.
-- `clean_df` keeps the best rep of each task on each generated input, then applies your optional `prepare` function.
-
-Use `prepare` to cast, derive or select `gen.*` columns. It only changes `clean_df`, so `raw_df` always matches what `impa` collected.
+A Lab never changes in place. Each step below returns a new Lab with the same metric settings. Every Lab also keeps `lab.raw`, the Lab as it was first built, so you can always get back to every row that was collected.
 
 ```python
-from impalab_py import Explorer
+from impalab_py import Lab
 
 def prepare(df):
     df["gen.size"] = df["gen.size"].astype("int64")
     return df
 
-explorer = Explorer.from_results(results, prepare=prepare, metric_label="Duration (ns)")
-print(explorer.get_clean_data().head())
+raw = Lab.from_jsonl(results, metric_label="Duration (ns)")
+lab = raw.pipe(prepare).best_of_reps()
 
-ax = explorer.plot_distributions("gen.size", ylog=True)
-fig = explorer.plot_trends_interactive("gen.size", normalized=True, xlog=True)
+print(lab.summary(by="gen.size"))
+ax = lab.plot_distributions("gen.size", ylog=True)
+fig = lab.plot_trends("gen.size", normalized=True, xlog=True)
 fig.show()
 ```
 
-The best rep is the one with the lowest metric. Pass `lower_is_better=False` to `from_results` when a higher metric is better, such as accuracy. The plots return the matplotlib axes or the plotly figure without showing them, so you can adjust them first.
+- `pipe` calls your function on a copy of the dataframe, down to any lists and dicts in its cells, and wraps the result in a new Lab. Use it to cast, derive or select `gen.*` columns.
+- `best_of_reps` keeps the best rep of each task on each generated input. Within one run, impalab replays the generator with the same seed on every rep, so `data_token` names the same input in every rep, and keeping the best rep removes system jitter. The best rep has the lowest metric, or the highest when you pass `lower_is_better=False`, for example for accuracy.
+- `summary` returns the count, mean, median, min, max and std of each task's metric, grouped by the columns you pass as `by`, with the best median first.
+- `plot_distributions` draws a box and strip plot of each task and returns the matplotlib axes. `plot_trends` draws each task's median from `summary` against a column and returns the plotly figure. Neither one shows the plot, so you can adjust it first. Pass `normalized=True` to divide the metric by the x column, for example to get a cost per element.
+
+To analyze a dataframe that is already in memory, wrap it with `Lab(df, metric_label=..., lower_is_better=...)`. It needs at least the `task_label` and `metric` columns, and `best_of_reps` also needs `run_id`, `task_index` and `data_token`.
+
+### Tasks and Runs
+
+`summary` and the plots treat each task configuration, meaning its executor, args and attributes, as a task of its own. Two configurations are never pooled, even when they share an executor and args, and repeated runs of one configuration pool together whatever order their tasks ran in. Attributes set for a whole run count too, so runs with different `experiment_name` attributes, for example, stay apart. When several configurations share an executor and args, their names add the args or attributes they differ in, such as `zig sort [opt=O3]`, and names that would still clash get a number, such as `#2`. Columns you group by don't count towards a task's configuration or its name. The `task_label` column in `lab.df` keeps the plain executor and args.
+
+`best_of_reps` matches reps on `run_id`, `task_index` and `data_token`. From version 0.6.0, `impa` writes the `run_id` of each `impa run` on every row, so results from different runs are never compared, even when their data tokens match. Results from older versions have no `run_id`, and `best_of_reps` refuses them. Add one with `pipe`, using one value per `impa run`. For example, if each run had its own `experiment_name` attribute:
+
+```python
+raw = raw.pipe(lambda df: df.assign(run_id=df["attr.experiment_name"]))
+```
+
+### Combining Labs
+
+`Lab.concat` stacks Labs, such as the results of several runs:
+
+```python
+both = Lab.concat([random_lab, sorted_lab])
+print(both.summary(by="attr.experiment_name"))
+```
+
+All the Labs must share the same `metric_label` and `lower_is_better`.
 
 ## Development
 
