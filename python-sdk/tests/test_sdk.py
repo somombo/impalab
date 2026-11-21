@@ -71,6 +71,23 @@ def test_download_executable_downloads_when_missing(mock_which, mock_urlopen, tm
         
     assert resolved == impa.impa_executable
 
+@pytest.mark.parametrize("platform, asset", [("linux", "impa-linux-amd64"), ("darwin", "impa-macos-amd64")])
+@mock.patch("urllib.request.urlopen")
+@mock.patch("shutil.which", return_value=None)
+@mock.patch.dict(os.environ, {}, clear=True)
+def test_download_executable_fetches_the_build_for_this_platform(mock_which, mock_urlopen, tmp_path, platform, asset):
+    mock_response = mock.MagicMock()
+    mock_response.__enter__.return_value = mock_response
+    mock_response.read.side_effect = [b"binary_content", b""]
+    mock_urlopen.return_value = mock_response
+    impa = Impa(root_dir=str(tmp_path), bin_dir=None)
+
+    with mock.patch.object(sys, "platform", platform):
+        impa.download_executable()
+
+    request = mock_urlopen.call_args.args[0]
+    assert request.full_url.endswith("/" + asset)
+
 @mock.patch("shutil.which", return_value=None)
 @mock.patch.dict(os.environ, {}, clear=True)
 def test_ensure_executable_raises_error_when_missing(mock_which, tmp_path):

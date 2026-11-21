@@ -58,7 +58,7 @@ class Impa:
 
         raise FileNotFoundError(f"'impa' executable not found at '{self.impa_executable}'. Please call `download_executable()` to install it.")
 
-    def download_executable(self, version_tag: str = "v0.5.1", target: Optional[str] = None) -> str:
+    def download_executable(self, version_tag: str = "v0.6.0", target: Optional[str] = None) -> str:
         print(f"Downloading 'impa' version '{version_tag}' from GitHub...", file=sys.stderr)
         
         exe_name = "impa.exe" if os.name == "nt" else "impa"
@@ -70,6 +70,8 @@ class Impa:
             url = f"https://github.com/somombo/impalab/releases/download/{version_tag}/impa-linux-amd64"
             if os.name == "nt":
                 url = f"https://github.com/somombo/impalab/releases/download/{version_tag}/impa-windows-amd64.exe"
+            elif sys.platform == "darwin":
+                url = f"https://github.com/somombo/impalab/releases/download/{version_tag}/impa-macos-amd64"
             
         parent_dir = os.path.dirname(download_path)
         if parent_dir:
