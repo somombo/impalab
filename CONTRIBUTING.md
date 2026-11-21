@@ -53,7 +53,7 @@ For the `impa` orchestrator to work, your component must respect its interface:
 
   * **Generators** MUST:
 
-      * Accept a `--seed=<u64>` argument.
+      * Read the `u64` seed from the `IMPALAB_SEED` environment variable, and print the same data for the same seed.
       * Accept any passthrough arguments (e.g., `--size=1000`).
       * Print test cases to `stdout`, one per line.
       * Each line MUST start with a unique `data_token` (e.g., `test_1,...`).

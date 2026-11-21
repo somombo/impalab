@@ -340,7 +340,7 @@ You can modify the configuration hierarchy or component specifications on the fl
 
 Logging is configured via environment variables:
 
-- `RUST_LOG`: Sets the log level (e.g., `RUST_LOG=info`, `RUST_LOG=debug`). Defaults to `info`.
+- `RUST_LOG`: Sets the log level (e.g., `RUST_LOG=info`, `RUST_LOG=debug`). Defaults to `warn`.
 - `BENCH_LOG_FILE`: If set, logs are written to this file instead of `stderr`.
 
 ## License
