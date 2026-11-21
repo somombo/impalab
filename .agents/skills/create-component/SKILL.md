@@ -93,7 +93,7 @@ Executors execute the benchmark work and measure performance.
 * **Environmental Variables**:
   * `IMPALAB_COMPONENT_NAME`: The unique name of the executor component.
   * `IMPALAB_TASK_INDEX`: The 0-based index of the task within the configuration's tasks list.
-  * `IMPALAB_REP_INDEX`: The current repetition run index (0-based) for the task.
+  * `IMPALAB_REP_INDEX`: The 0-based index of the current repetition of the task.
   * `IMPALAB_REPS`: The total number of repetitions planned for this task.
   * `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
 * **Standard Input (stdin)**:

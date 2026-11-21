@@ -97,19 +97,19 @@ To work with Impalab, your component executables must follow a simple interface.
 **Example Output (from the TypeScript generator):**
 
 ```text
-run_1 8 10 5 3 8 1
-run_2 4 9 2 7 4 6
+case_1 8 10 5 3 8 1
+case_2 4 9 2 7 4 6
 ```
 
 In this convention, each line is a test case.
 
-- `run_1` is the unique **data_token**.
+- `case_1` is the unique **data_token**.
 - `8` is the "needle" to search for.
 - `10`, `5`, `3`, `8`, `1` is the "haystack" to search in.
 
 ### Advanced Metadata (data_token)
 
-While `data_token` is typically a simple string (e.g., `run_1`), Impalab supports embedding structured metadata directly into the `data_token`. If a `data_token` starts with the `meta:` prefix, the remaining part is expected to be a **Base64-encoded JSON string**.
+While `data_token` is typically a simple string (e.g., `case_1`), Impalab supports embedding structured metadata directly into the `data_token`. If a `data_token` starts with the `meta:` prefix, the remaining part is expected to be a **Base64-encoded JSON string**.
 
 When `impa` encounters such a `data_token`, it will:
 1. Strip the `meta:` prefix.
@@ -165,7 +165,7 @@ Impalab injects dynamic execution state directly into component processes via en
 
 - `IMPALAB_COMPONENT_NAME`: The unique name of the executor component.
 - `IMPALAB_TASK_INDEX`: The 0-based index of the task within the configuration's tasks list.
-- `IMPALAB_REP_INDEX`: The current repetition run index (0-based) for the task.
+- `IMPALAB_REP_INDEX`: The 0-based index of the current repetition of the task.
 - `IMPALAB_REPS`: The total number of repetitions planned for this task.
 - `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
 
@@ -173,8 +173,8 @@ Impalab injects dynamic execution state directly into component processes via en
 (This output corresponds to the generator input above for the task with `"args": ["linear_search"]`)
 
 ```text
-450|run_1
-455|run_2|{"converged":true,"iters":10}
+450|case_1
+455|case_2|{"converged":true,"iters":10}
 ```
 
 ## Workflow Example
@@ -279,9 +279,9 @@ By omitting the generator, the executor's `stdin` is automatically connected to 
 `impa` captures the pipe-delimited output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, any resolved `attributes`, and optional metadata from both the generator and the executor. To keep the output clean, empty fields (such as `args` or `attributes` when they are empty) and missing metadata fields are omitted from the JSON object.
 
 ```json
-{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"run_1","metric":450}
-{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_token":"run_1","metric":30}
-{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"run_1","exec_meta":{"converged":true},"metric":52000}
+{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"case_1","metric":450}
+{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_token":"case_1","metric":30}
+{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"case_1","exec_meta":{"converged":true},"metric":52000}
 ```
 
 This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment like a **Jupyter notebook** using Python and Pandas.

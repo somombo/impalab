@@ -450,16 +450,16 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_valid() {
-    let (metric, id, meta) = parse_native_line("45000|run_123").unwrap();
-    assert_eq!(id, "run_123");
+    let (metric, id, meta) = parse_native_line("45000|case_123").unwrap();
+    assert_eq!(id, "case_123");
     assert_eq!(metric, serde_json::Number::from(45000));
     assert!(meta.is_none());
   }
 
   #[test]
   fn test_parse_native_line_valid_float() {
-    let (metric, id, meta) = parse_native_line("45.52|run_123").unwrap();
-    assert_eq!(id, "run_123");
+    let (metric, id, meta) = parse_native_line("45.52|case_123").unwrap();
+    assert_eq!(id, "case_123");
     assert_eq!(metric, serde_json::Number::from_f64(45.52).unwrap());
     assert!(meta.is_none());
   }
@@ -467,8 +467,8 @@ mod tests {
   #[test]
   fn test_parse_native_line_with_meta() {
     let (metric, id, meta) =
-      parse_native_line(r#"450|run_1|{"converged":true,"iters":10}"#).unwrap();
-    assert_eq!(id, "run_1");
+      parse_native_line(r#"450|case_1|{"converged":true,"iters":10}"#).unwrap();
+    assert_eq!(id, "case_1");
     assert_eq!(metric, serde_json::Number::from(450));
     let meta = meta.unwrap();
     assert_eq!(meta["converged"], true);
@@ -477,14 +477,14 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_with_malformed_meta() {
-    let res = parse_native_line(r#"450|run_1|{"bad":true"#);
+    let res = parse_native_line(r#"450|case_1|{"bad":true"#);
 
     assert!(matches!(res, Err(BenchmarkError::MalformedJSON { .. })));
   }
 
   #[test]
   fn test_parse_native_line_newline_failure() {
-    let res = parse_native_line("450|run_1|{");
+    let res = parse_native_line("450|case_1|{");
 
     match res {
       Err(BenchmarkError::MalformedJSON {
@@ -501,16 +501,16 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_nested_array() {
-    let (metric, id, meta) = parse_native_line(r#"450|run_1|[1, 2, {"a": "b"}]"#).unwrap();
-    assert_eq!(id, "run_1");
+    let (metric, id, meta) = parse_native_line(r#"450|case_1|[1, 2, {"a": "b"}]"#).unwrap();
+    assert_eq!(id, "case_1");
     assert_eq!(metric, serde_json::Number::from(450));
     assert!(meta.unwrap().is_array());
   }
 
   #[test]
   fn test_parse_native_line_with_nested_pipes_in_meta() {
-    let (metric, id, meta) = parse_native_line(r#"450|run_1|{"msg":"foo|bar"}"#).unwrap();
-    assert_eq!(id, "run_1");
+    let (metric, id, meta) = parse_native_line(r#"450|case_1|{"msg":"foo|bar"}"#).unwrap();
+    assert_eq!(id, "case_1");
     assert_eq!(metric, serde_json::Number::from(450));
     assert_eq!(meta.unwrap()["msg"], "foo|bar");
   }
@@ -525,7 +525,7 @@ mod tests {
     assert_eq!(meta.unwrap()["size"], 100);
 
     // Plain string
-    let meta = extract_gen_meta("run_1").unwrap();
+    let meta = extract_gen_meta("case_1").unwrap();
     assert!(meta.is_none());
 
     // Invalid Base64
@@ -550,7 +550,7 @@ mod tests {
 
   #[test]
   fn test_parse_native_line_malformed_invalid_metric() {
-    let res = parse_native_line("fast|run_123");
+    let res = parse_native_line("fast|case_123");
     assert!(matches!(res, Err(BenchmarkError::ParseMetric { .. })));
   }
 }
