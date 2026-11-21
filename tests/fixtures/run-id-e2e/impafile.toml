@@ -1,0 +1,15 @@
+[[components]]
+name = "run-id-gen"
+type = "generator"
+
+[components.run]
+command = "python3"
+args = ["-c", "import base64, json, os; print('meta:' + base64.b64encode(json.dumps({'run_id': os.environ['IMPALAB_RUN_ID']}).encode()).decode())"]
+
+[[components]]
+name = "run-id-exec"
+type = "executor"
+
+[components.run]
+command = "python3"
+args = ["-c", "import json, os, sys; meta = json.dumps({'run_id': os.environ['IMPALAB_RUN_ID']}); [print('1|' + line.strip() + '|' + meta) for line in sys.stdin]"]

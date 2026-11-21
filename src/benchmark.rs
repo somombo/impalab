@@ -26,9 +26,16 @@ use tokio::io::BufReader;
 use tokio::process::Child;
 use tokio::process::Command;
 use tracing::Instrument;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
 struct BenchmarkMeta {
+  run_id: Uuid,
+
+  // A string, because random u64 seeds exceed the integer precision of JSON parsers that use doubles.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  seed: Option<String>,
+
   task_index: usize,
 
   executor: String,
@@ -46,12 +53,17 @@ struct BenchmarkMeta {
 /// Takes a fully resolved `Config` and executes the benchmark plan.
 /// It handles spawning the generator (if any) and all executor processes (tasks),
 /// piping data, and logging results.
+///
+/// Each call generates a new UUIDv7 `run_id`. It tags every output row and is
+/// passed to every component as `IMPALAB_RUN_ID`.
 pub async fn run_benchmarks(
   ResolvedConfig {
     generator: gen_cmd_args,
     tasks,
   }: ResolvedConfig,
 ) -> Result<(), BenchmarkError> {
+  let run_id = Uuid::now_v7();
+
   let gen_info = if let Some(ResolvedGenerator {
     seed,
     command_args: gen_cmd,
@@ -73,6 +85,7 @@ pub async fn run_benchmarks(
 
   let span = tracing::info_span!(
     "run_benchmarks",
+    %run_id,
     %gen_info
   );
 
@@ -96,7 +109,7 @@ pub async fn run_benchmarks(
             reps
           );
 
-          match run_pipeline(gen_cmd_args.as_ref(), task, rep_index).await {
+          match run_pipeline(gen_cmd_args.as_ref(), task, rep_index, run_id).await {
             Ok(_) => {
               tracing::info!(
                 "Finished running pipeline: {} (rep_index {})",
@@ -144,6 +157,7 @@ async fn run_pipeline(
     },
   ): (usize, &ResolvedTask),
   rep_index: usize,
+  run_id: Uuid,
 ) -> Result<(), BenchmarkError> {
   let mut gen_child_handle: Option<Child> = None;
   let mut gen_stderr_handle: Option<tokio::task::JoinHandle<Result<(), BenchmarkError>>> = None;
@@ -161,6 +175,7 @@ async fn run_pipeline(
   }
 
   exec_cmd
+    .env("IMPALAB_RUN_ID", run_id.to_string())
     .env("IMPALAB_COMPONENT_NAME", executor_name)
     .env("IMPALAB_TASK_INDEX", task_index.to_string())
     .env("IMPALAB_REP_INDEX", rep_index.to_string())
@@ -190,6 +205,7 @@ async fn run_pipeline(
     }
 
     gen_cmd
+      .env("IMPALAB_RUN_ID", run_id.to_string())
       .env("IMPALAB_COMPONENT_NAME", generator_name)
       .env("IMPALAB_SEED", seed.to_string())
       .env(
@@ -246,6 +262,8 @@ async fn run_pipeline(
 
   // --- Concurrently process all IO ---
   let meta = BenchmarkMeta {
+    run_id,
+    seed: generator_cfg.map(|g| g.seed.to_string()),
     task_index,
     executor: executor_name.clone(),
     task_args: task_args.clone(),

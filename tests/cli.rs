@@ -157,10 +157,10 @@ fn test_build_and_run_e2e() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_token":"test_case_1","metric":1234}"#)
+      predicate::str::contains(r#""seed":"42","task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_token":"test_case_1","metric":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_token":"test_case_1","metric":12}"#)
+      predicate::str::contains(r#""seed":"42","task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_token":"test_case_1","metric":12}"#)
     );
 }
 
@@ -242,10 +242,10 @@ fn test_build_and_run_e2e_stdin_config() {
     .assert()
     .success()
     .stdout(
-      predicate::str::contains(r#"{"task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_token":"test_case_1","metric":1234}"#)
+      predicate::str::contains(r#""seed":"42","task_index":0,"executor":"python-e2e","args":["test_func_1"],"rep_index":0,"data_token":"test_case_1","metric":1234}"#)
     )
     .stdout(
-      predicate::str::contains(r#"{"task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_token":"test_case_1","metric":12}"#)
+      predicate::str::contains(r#""seed":"42","task_index":1,"executor":"python-e2e","args":["test_func_2","--foo=true","--bars=-100"],"rep_index":0,"data_token":"test_case_1","metric":12}"#)
     );
 }
 
@@ -513,6 +513,8 @@ fn test_run_with_exec_meta() {
   run_cmd
     .assert()
     .success()
+    .stdout(predicate::str::contains(r#"{"run_id":""#))
+    .stdout(predicate::str::contains(r#""seed""#).not())
     .stdout(predicate::str::contains(r#""data_token":"""#))
     .stdout(predicate::str::contains(
       r#""exec_meta":{"converged":true}"#,
@@ -559,4 +561,91 @@ fn test_generator_seed_env_var_validation() {
     .env("IMPALAB_SEED", "42");
   let assert_valid = cmd_valid.assert();
   assert_valid.success();
+}
+
+#[test]
+fn test_run_id_and_seed_e2e() {
+  let temp = tempdir().unwrap();
+  let components_dir = temp.path().join("components");
+  fs::create_dir_all(&components_dir).unwrap();
+
+  let options = CopyOptions::new();
+  copy("tests/fixtures", temp.path(), &options).unwrap();
+  fs::rename(temp.path().join("fixtures"), &components_dir).unwrap();
+
+  let mut build_cmd = Command::new(cargo::cargo_bin!("impa"));
+  build_cmd
+    .arg("build")
+    .arg("--components-dir")
+    .arg(&components_dir)
+    .arg("--root-dir")
+    .arg(temp.path())
+    .arg("--manifest-filename")
+    .arg("manifest.json")
+    .env("NO_COLOR", "1");
+  build_cmd.assert().success();
+
+  // Two tasks with two reps each, so a single run spans several tasks, reps and processes.
+  let config_str = r#"{
+    "generator": {"name": "run-id-gen", "seed": 42},
+    "reps": 2,
+    "tasks": [
+      {"executor": "run-id-exec"},
+      {"executor": "run-id-exec"}
+    ]
+  }"#;
+
+  let run = || -> Vec<Value> {
+    let mut run_cmd = Command::new(cargo::cargo_bin!("impa"));
+    run_cmd
+      .arg("run")
+      .arg("--root-dir")
+      .arg(temp.path())
+      .arg("--manifest-filename")
+      .arg("manifest.json")
+      .arg("--config")
+      .arg("-")
+      .env("NO_COLOR", "1")
+      .write_stdin(config_str);
+
+    let stdout = run_cmd.assert().success().get_output().stdout.clone();
+    String::from_utf8(stdout)
+      .unwrap()
+      .lines()
+      .map(|line| serde_json::from_str(line).unwrap())
+      .collect()
+  };
+
+  let rows = run();
+  assert_eq!(rows.len(), 4, "expected one row per task rep: {rows:?}");
+
+  let run_id = rows[0]["run_id"]
+    .as_str()
+    .expect("run_id should be a string");
+  let parsed = uuid::Uuid::parse_str(run_id).expect("run_id should be a UUID");
+  assert_eq!(parsed.get_version_num(), 7, "run_id should be a UUIDv7");
+  assert_eq!(
+    run_id,
+    parsed.hyphenated().to_string(),
+    "run_id should be lowercase and hyphenated"
+  );
+
+  for row in &rows {
+    assert_eq!(row["run_id"], run_id, "run_id should match on every row");
+    assert_eq!(row["seed"], "42", "seed should be written as a string");
+    assert_eq!(
+      row["gen_meta"]["run_id"], run_id,
+      "generator should receive IMPALAB_RUN_ID"
+    );
+    assert_eq!(
+      row["exec_meta"]["run_id"], run_id,
+      "executor should receive IMPALAB_RUN_ID"
+    );
+  }
+
+  let next_rows = run();
+  assert_ne!(
+    next_rows[0]["run_id"], rows[0]["run_id"],
+    "each invocation should get a new run_id"
+  );
 }

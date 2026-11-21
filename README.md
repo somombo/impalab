@@ -157,12 +157,14 @@ Impalab injects dynamic execution state directly into component processes via en
 
 #### Variables Injected into Generators
 
+- `IMPALAB_RUN_ID`: The UUIDv7 of the current `impa run` invocation, the same value as the `run_id` field in the output. Use it to tag side outputs, such as profiles or traces, so you can match them to the results.
 - `IMPALAB_COMPONENT_NAME`: The unique name of the generator component (e.g. `py-gen-e2e`).
 - `IMPALAB_SEED`: A 64-bit unsigned integer (`u64`) seed (e.g. `42`) to guarantee reproducibility.
 - `IMPALAB_ATTRIBUTES`: A minified, single-line JSON string containing the merged attributes of the benchmark configuration.
 
 #### Variables Injected into Executors
 
+- `IMPALAB_RUN_ID`: The UUIDv7 of the current `impa run` invocation, the same value as the `run_id` field in the output. Use it to tag side outputs, such as profiles or traces, so you can match them to the results.
 - `IMPALAB_COMPONENT_NAME`: The unique name of the executor component.
 - `IMPALAB_TASK_INDEX`: The 0-based index of the task within the configuration's tasks list.
 - `IMPALAB_REP_INDEX`: The 0-based index of the current repetition of the task.
@@ -276,15 +278,21 @@ By omitting the generator, the executor's `stdin` is automatically connected to 
 
 ## Benchmark Output & Analysis
 
-`impa` captures the pipe-delimited output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `task_index`, the `rep_index`, any resolved `attributes`, and optional metadata from both the generator and the executor. To keep the output clean, empty fields (such as `args` or `attributes` when they are empty) and missing metadata fields are omitted from the JSON object.
+`impa` captures the pipe-delimited output from all tasks and prints it to its own `stdout` as structured, newline-delimited JSON (JSONL). The output includes the `run_id`, the generator `seed`, the `task_index`, the `rep_index`, any resolved `attributes`, and optional metadata from both the generator and the executor. To keep the output clean, empty fields (such as `args` or `attributes` when they are empty) and missing fields (such as `seed` when there is no generator, or absent metadata) are omitted from the JSON object.
 
 ```json
-{"task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"case_1","metric":450}
-{"task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_token":"case_1","metric":30}
-{"task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"case_1","exec_meta":{"converged":true},"metric":52000}
+{"run_id":"01a1fd89-6d24-74e3-867e-6e246e06029c","seed":"7722126380177453626","task_index":0,"executor":"zig-executors","args":["linear_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64","tier":"high","simd":true},"data_token":"case_1","metric":450}
+{"run_id":"01a1fd89-6d24-74e3-867e-6e246e06029c","seed":"7722126380177453626","task_index":1,"executor":"zig-executors","args":["binary_search"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"x86_64"},"data_token":"case_1","metric":30}
+{"run_id":"01a1fd89-6d24-74e3-867e-6e246e06029c","seed":"7722126380177453626","task_index":2,"executor":"python-executors","args":["linear_search_py"],"rep_index":0,"attributes":{"environment":"production","threads":8,"cpu":"arm64"},"data_token":"case_1","exec_meta":{"converged":true},"metric":52000}
 ```
 
 This JSONL format is designed for easy consumption. While you can pipe it to tools like `jq` for quick queries, the intended use case is to parse it in a data analysis environment like a **Jupyter notebook** using Python and Pandas.
+
+#### Run Identity
+
+Every row carries a `run_id`, a UUIDv7 that `impa` generates once per `impa run` invocation. All rows from one invocation share it, and every new invocation gets a new one. This lets you append the results of many runs to one file, or load them into one DataFrame, and still tell the runs apart. Log messages from the benchmark pipeline include the same `run_id`, so you can match logs to results too. A UUIDv7 starts with a millisecond timestamp, so sorting by `run_id` roughly sorts runs by start time. Clocks drift and differ between machines, so do not treat this order as exact.
+
+When a run has a generator, each row also carries the `seed` the generator received, including a seed that `impa` picked at random. If the generator honors `IMPALAB_SEED`, passing that value back with `--set generator.seed=<seed>` reproduces the same data stream. The seed is written as a string because random 64-bit seeds are larger than the integers that some JSON parsers, such as JavaScript's, can store exactly.
 
 #### Data Science Workflow (Pandas)
 
