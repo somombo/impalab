@@ -12,7 +12,7 @@ import json
 import os
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from . import jsonl
 
@@ -170,6 +170,43 @@ def _task_configurations(df: pd.DataFrame, exclude: Sequence[str] = ()) -> tuple
             ]
             names[config] = f"{label} [{', '.join(parts)}]" if parts else label
     return configs, _distinct(names)
+
+
+def _fit_y_to_whiskers(ax: Axes, data: pd.DataFrame, by: list[str]) -> None:
+    """Fit the y-axis to the whiskers of the metric's boxes, grouped ``by``.
+
+    Otherwise a few extreme points stretch the axis until every box is flat.
+    As seaborn draws them, whiskers reach the furthest points within 1.5 IQR
+    of their box, measured in the axis's scale, such as log space on a log
+    axis. A note on the plot counts the points left outside the axis.
+    """
+    scale = ax.yaxis.get_transform()
+    scaled = data[by].assign(y=scale.transform(data["metric"]))
+    groups = scaled.groupby(by, observed=True)["y"]
+    q1, q3 = groups.transform("quantile", 0.25), groups.transform("quantile", 0.75)
+    reach = 1.5 * (q3 - q1)
+    whiskered = scaled["y"][scaled["y"].between(q1 - reach, q3 + reach)]
+    low, high = whiskered.min(), whiskered.max()
+    # Written so that NaN, from metrics with no finite value, also skips the fit.
+    if not low < high:
+        return
+    _, margin = ax.margins()
+    padding = margin * (high - low)
+    ax.set_ylim(scale.inverted().transform([low - padding, high + padding]))
+
+    low, high = ax.get_ylim()
+    outside = ((data["metric"] < low) | (data["metric"] > high)).sum()
+    if outside:
+        ax.text(
+            0.01,
+            0.99,
+            f"{outside:,} of {len(data):,} points are outside the y-axis range",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            color="dimgray",
+        )
 
 
 class Lab:
@@ -435,16 +472,22 @@ class Lab:
         x: str | None = None,
         title: str = "Performance Distributions",
         *,
+        show: Literal["both", "boxes", "points"] = "both",
         normalized: bool = False,
         ylog: bool = False,
         ax: Axes | None = None,
     ) -> Axes:
         """Box-and-strip plot of each task's metric, grouped by ``x``.
 
-        Tasks are told apart and named as in :meth:`summary`. Draws on ``ax``
-        when given, otherwise on a new figure. Returns the axes without
-        showing them.
+        ``show`` picks what to draw: ``"both"``, only the ``"boxes"`` and
+        their whiskers, or only the ``"points"``. Tasks are told apart and named as in :meth:`summary`. Whatever is
+        drawn, the y-axis fits the boxes' whiskers rather than every point,
+        so a few extreme points can't flatten the boxes, and a note on the
+        plot counts the points left outside it. Draws on ``ax`` when given,
+        otherwise on a new figure. Returns the axes without showing them.
         """
+        if show not in ("both", "boxes", "points"):
+            raise ValueError(f"show must be 'both', 'boxes' or 'points', not {show!r}")
         try:
             import matplotlib.pyplot as plt
             import seaborn as sns
@@ -461,35 +504,44 @@ class Lab:
         data = lab.df.assign(task_label=[names[config] for config in configs])
         if ax is None:
             _, ax = plt.subplots(figsize=(12, 10), layout="tight")
-        sns.boxplot(
-            data=data,
-            x=x,
-            y="metric",
-            hue="task_label",
-            dodge=True,  # the same as the stripplot, so points sit on their boxes
-            fliersize=0,  # the stripplot already draws every point
-            ax=ax,
-        )
-        sns.stripplot(
-            data=data,
-            x=x,
-            y="metric",
-            palette="dark:black",
-            hue="task_label",
-            dodge=True,
-            jitter=0.2,
-            alpha=0.3,
-            size=3,
-            legend=False,
-            ax=ax,
-        )
+        if ylog:
+            ax.set_yscale("log")  # before drawing, so seaborn computes the boxes in log space
+
+        # The palette seaborn would pick, made explicit so the points can take darker shades of it.
+        cycle = sns.color_palette()
+        palette = sns.color_palette(cycle if len(names) <= len(cycle) else "husl", len(names))
+        if show != "points":
+            sns.boxplot(
+                data=data,
+                x=x,
+                y="metric",
+                hue="task_label",
+                palette=palette,
+                dodge=True,  # the same as the stripplot, so points sit on their boxes
+                showfliers=False,
+                ax=ax,
+            )
+        if show != "boxes":
+            darker = [tuple(0.55 * channel for channel in color) for color in palette]
+            sns.stripplot(
+                data=data,
+                x=x,
+                y="metric",
+                hue="task_label",
+                palette=darker if show == "both" else palette,  # darker points stand out on the boxes
+                dodge=True,
+                jitter=0.2,
+                alpha=0.5,
+                size=3,
+                legend=show == "points",  # otherwise the boxes' legend names the tasks
+                ax=ax,
+            )
+        _fit_y_to_whiskers(ax, data, by=[x, "task_label"] if x else ["task_label"])
 
         ax.set_title(title, fontsize=16)
         ax.set_xlabel((x or "Task").title(), fontsize=12)
         ax.set_ylabel(metric_label, fontsize=12)
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
         ax.grid(axis="y", linestyle="--", alpha=0.7)
-        ax.legend(title="Task", fontsize=10)
-        if ylog:
-            ax.set_yscale("log")
+        ax.legend(title="Task", fontsize=10, markerscale=3)  # otherwise point markers are as small as the points
         return ax

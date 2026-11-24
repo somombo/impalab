@@ -437,6 +437,46 @@ def test_plot_distributions_draws_each_tasks_points_on_its_box(plt):
     assert medians == pytest.approx(points, abs=0.02)
 
 
+def one_box(metrics):
+    return Lab(pd.DataFrame({"gen.size": 10, "metric": metrics, "task_label": "zig sort"}))
+
+
+@pytest.mark.parametrize("ylog", [False, True], ids=["linear", "log"])
+def test_plot_distributions_keeps_an_extreme_point_from_stretching_the_y_axis(plt, ylog):
+    typical = list(range(100, 120))
+
+    ax_typical = one_box(typical).plot_distributions("gen.size", ylog=ylog)
+    ax_extreme = one_box(typical + [100_000]).plot_distributions("gen.size", ylog=ylog)
+
+    assert ax_extreme.get_ylim() == pytest.approx(ax_typical.get_ylim())
+    assert [text.get_text() for text in ax_typical.texts] == []
+    assert [text.get_text() for text in ax_extreme.texts] == ["1 of 21 points are outside the y-axis range"]
+    # The extreme point is still drawn, just outside the axis.
+    assert sum(len(points.get_offsets()) for points in ax_extreme.collections) == 21
+
+
+@pytest.mark.parametrize("show, boxes, points", [
+    ("both", 1, 21),
+    ("boxes", 1, 0),
+    ("points", 0, 21),
+])
+def test_plot_distributions_draws_what_show_asks_for(plt, show, boxes, points):
+    from matplotlib.patches import PathPatch
+
+    ax = one_box(list(range(100, 120)) + [100_000]).plot_distributions("gen.size", show=show)
+
+    assert sum(isinstance(patch, PathPatch) for patch in ax.patches) == boxes
+    assert sum(len(c.get_offsets()) for c in ax.collections) == points
+    # Boxes never mark the points beyond their whiskers, even without the points.
+    assert not any(100_000 in line.get_ydata() for line in ax.lines)
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == ["zig sort"]
+
+
+def test_plot_distributions_rejects_an_unknown_show():
+    with pytest.raises(ValueError, match="show must be"):
+        Lab.from_jsonl(RESULTS).plot_distributions("gen.size", show="violin")
+
+
 def test_normalized_plots_require_an_x_column(plt):
     with pytest.raises(ValueError, match="x column"):
         Lab.from_jsonl(RESULTS).plot_distributions(normalized=True)
